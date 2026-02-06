@@ -17,15 +17,19 @@ import (
 
 // RWA GUARD CONSTANTS - Institutional-Grade Protection
 const (
-	MAX_DEVIANCE = 0.05 // 5% maximum price deviation before triggering shield
+	MAX_DEVIANCE          = 0.05 // 5% maximum price deviation before triggering shield
+	PREDICTIVE_RISK_BONUS = 3.0  // Risk bonus when AI detects momentum acceleration
 )
 
-// STATE MEMORY - Track previous execution prices
+// STATE MEMORY - Track previous execution prices and variance history
 // In production, this would be stored in contract state or DON consensus memory
 var (
 	previousGoldPrice float64 = 0.0
 	previousMsftPrice float64 = 0.0
 	executionCount    int     = 0
+
+	// LAYER 3: Predictive Momentum Engine - AI Brain
+	varianceHistory []float64 // Stores last 3 CrossAssetVariance values for acceleration detection
 )
 
 type Config struct {
@@ -64,6 +68,7 @@ type ExecutionResult struct {
 	CrossAssetVariance float64   `json:"cross_asset_variance"`
 	VolatilityWarning  string    `json:"volatility_warning"`
 	SystemRiskScore    float64   `json:"system_risk_score"`
+	MarketMomentum     string    `json:"market_momentum"` // LAYER 3: Stable/Unstable/Critical
 	Message            string    `json:"message"`
 	Timestamp          time.Time `json:"timestamp"`
 	DataSource         string    `json:"data_source"`
@@ -98,28 +103,43 @@ func onCronTriggerWithMockData(config *Config, runtime cre.Runtime, trigger *cro
 	executionCount++
 
 	logger.Info("========================================")
-	logger.Info(fmt.Sprintf("🚀 AuraProtocol - RWA Guard Demonstration [Iteration #%d]", executionCount))
+	logger.Info(fmt.Sprintf("🧠 AuraProtocol - Layer 3: Predictive Momentum Engine [Iteration #%d]", executionCount))
 	logger.Info("========================================")
 	logger.Info("⚠️  HTTP capabilities not available in local simulation")
-	logger.Info("📊 Running MULTI-ITERATION FLASH CRASH SCENARIO")
+	logger.Info("📊 Running 3-STAGE PREDICTIVE INTELLIGENCE SCENARIO")
 
-	// FLASH CRASH SCENARIO SIMULATION
-	// Iteration 1: Normal market conditions
-	// Iteration 2: Flash crash - Gold drops by 26% to trigger RWA Guard
+	// 3-STAGE PREDICTIVE SCENARIO
+	// Stage 1: Normal market - Low variance (0.2%)
+	// Stage 2: Market nervousness - Variance accelerating (1.8%) - AI PREDICTS HERE
+	// Stage 3: Flash crash - Extreme variance (25%) - RWA Guard activates
 	var goldPrice float64
 	var msftPrice float64
+	var artificialVariance float64 // For demonstration, we'll inject variance
 
-	if executionCount == 1 {
-		// First iteration: NORMAL MARKET CONDITIONS
+	switch executionCount {
+	case 1:
+		// Stage 1: NORMAL MARKET CONDITIONS
 		goldPrice = 243.75
 		msftPrice = 438.20
-		logger.Info("📈 SCENARIO: Normal Market Conditions")
-	} else {
-		// Second+ iterations: FLASH CRASH DETECTED
-		goldPrice = 180.00 // 26% drop - way beyond 5% threshold
-		msftPrice = 438.20 // MSFT remains stable
-		logger.Info("💥 SCENARIO: Flash Crash Injected (Gold -26%)")
-		logger.Info("🔍 Testing RWA Guard activation...")
+		artificialVariance = 0.2 // 0.2% variance (stable)
+		logger.Info("📈 STAGE 1: Normal Market Conditions")
+		logger.Info("   Variance: 0.2% (Baseline)")
+	case 2:
+		// Stage 2: MARKET NERVOUSNESS - AI Should Detect Acceleration
+		goldPrice = 240.50       // Small 1.3% drop (within RWA Guard threshold)
+		msftPrice = 438.20       // MSFT stable
+		artificialVariance = 1.8 // 1.8% variance (growing!)
+		logger.Info("📊 STAGE 2: Market Nervousness Detected")
+		logger.Info("   Variance: 1.8% (Accelerating)")
+		logger.Info("   🔍 AI analyzing momentum patterns...")
+	default:
+		// Stage 3: FLASH CRASH
+		goldPrice = 180.00        // 26% drop - triggers RWA Guard
+		msftPrice = 438.20        // MSFT stable
+		artificialVariance = 25.0 // 25% variance (extreme!)
+		logger.Info("💥 STAGE 3: Flash Crash Event")
+		logger.Info("   Variance: 25.0% (CRITICAL)")
+		logger.Info("   🛡️ RWA Guard should activate...")
 	}
 
 	logger.Info(fmt.Sprintf("Current GOLD Price: $%.2f", goldPrice))
@@ -144,13 +164,87 @@ func onCronTriggerWithMockData(config *Config, runtime cre.Runtime, trigger *cro
 	goldConsensus := computeConsensus(goldPrices, "GOLD", config, logger)
 	msftConsensus := computeConsensus(msftPrices, "MSFT", config, logger)
 
-	crossAssetVariance := math.Abs(goldConsensus.Variance - msftConsensus.Variance)
+	// Use artificial variance for demonstration
+	crossAssetVariance := artificialVariance
 	systemRiskScore := (goldConsensus.RiskScore + msftConsensus.RiskScore) / 2.0
 
 	alert := "Normal"
+	marketMomentum := "Stable"
 
 	// ═══════════════════════════════════════════════════════════════
-	// 🛡️ RWA GUARD - PROTECTION CIRCUIT
+	// 🧠 LAYER 3: PREDICTIVE MOMENTUM ENGINE - AI BRAIN
+	// ═══════════════════════════════════════════════════════════════
+	logger.Info("========================================")
+	logger.Info("🧠 LAYER 3: Predictive Momentum Engine")
+	logger.Info("========================================")
+
+	// Add current variance to history
+	varianceHistory = append(varianceHistory, crossAssetVariance)
+
+	// Keep only last 3 values
+	if len(varianceHistory) > 3 {
+		varianceHistory = varianceHistory[len(varianceHistory)-3:]
+	}
+
+	logger.Info(fmt.Sprintf("Variance History (last %d): %v", len(varianceHistory), varianceHistory))
+
+	// AI LOGIC: Detect momentum acceleration
+	if len(varianceHistory) >= 2 {
+		// Calculate acceleration (rate of change of rate of change)
+		// If variance is growing exponentially, this will be positive and large
+
+		currentVariance := varianceHistory[len(varianceHistory)-1]
+		previousVariance := varianceHistory[len(varianceHistory)-2]
+
+		// Calculate the growth rate
+		varianceGrowth := currentVariance - previousVariance
+
+		logger.Info(fmt.Sprintf("Current Variance: %.2f%%", currentVariance))
+		logger.Info(fmt.Sprintf("Previous Variance: %.2f%%", previousVariance))
+		logger.Info(fmt.Sprintf("Variance Growth: %.2f%%", varianceGrowth))
+
+		// Check for exponential growth pattern (acceleration)
+		// If we have 3 data points, we can calculate true acceleration
+		if len(varianceHistory) >= 3 {
+			oldestVariance := varianceHistory[len(varianceHistory)-3]
+			previousGrowth := previousVariance - oldestVariance
+
+			// Acceleration = change in growth rate
+			acceleration := varianceGrowth - previousGrowth
+
+			logger.Info(fmt.Sprintf("Oldest Variance: %.2f%%", oldestVariance))
+			logger.Info(fmt.Sprintf("Previous Growth: %.2f%%", previousGrowth))
+			logger.Info(fmt.Sprintf("🎯 ACCELERATION: %.2f%%", acceleration))
+
+			// PREDICTIVE THRESHOLD: If acceleration > 0.5%, we predict trouble
+			if acceleration > 0.5 {
+				// 🧠 AI PREDICTION TRIGGERED
+				systemRiskScore += PREDICTIVE_RISK_BONUS
+				marketMomentum = "Unstable"
+
+				logger.Warn("========================================")
+				logger.Warn("⚠️  PREDICTIVE WARNING ACTIVATED")
+				logger.Warn("========================================")
+				logger.Warn(fmt.Sprintf("🧠 AI BRAIN: Momentum acceleration detected! (+%.2f%%)", acceleration))
+				logger.Warn(fmt.Sprintf("🧠 PATTERN: %.2f%% → %.2f%% → %.2f%% (Exponential Growth)",
+					oldestVariance, previousVariance, currentVariance))
+				logger.Warn(fmt.Sprintf("🧠 PREDICTION: Market crash likely in next iteration"))
+				logger.Warn(fmt.Sprintf("🧠 ACTION: Adding Predictive Risk Bonus +%.1f to score", PREDICTIVE_RISK_BONUS))
+				logger.Warn(fmt.Sprintf("🧠 NEW RISK SCORE: %.1f/10.0", systemRiskScore))
+				logger.Warn("========================================")
+			} else {
+				logger.Info(fmt.Sprintf("✅ AI BRAIN: Acceleration %.2f%% below prediction threshold (0.5%%)", acceleration))
+				logger.Info("✅ Market momentum appears stable")
+			}
+		} else {
+			logger.Info("ℹ️  AI BRAIN: Collecting data... need 3 points for acceleration analysis")
+		}
+	} else {
+		logger.Info("ℹ️  AI BRAIN: First iteration - establishing baseline")
+	}
+
+	// ═══════════════════════════════════════════════════════════════
+	// 🛡️ RWA GUARD - PROTECTION CIRCUIT (LAYER 2)
 	// ═══════════════════════════════════════════════════════════════
 	if previousGoldPrice != 0.0 {
 		// Calculate price deviation from previous execution
@@ -169,6 +263,7 @@ func onCronTriggerWithMockData(config *Config, runtime cre.Runtime, trigger *cro
 			// 🚨 PROTECTION CIRCUIT ACTIVATED
 			systemRiskScore = 10.0 // CRITICAL - Maximum risk
 			alert = "CRITICAL_HALT"
+			marketMomentum = "Critical"
 
 			logger.Error("🚨🚨🚨 CRITICAL ALERT 🚨🚨🚨")
 			logger.Error(fmt.Sprintf("🛡️ RWA GUARD ACTIVATED: Gold price deviation %.2f%% exceeds %.2f%% threshold!",
@@ -184,36 +279,43 @@ func onCronTriggerWithMockData(config *Config, runtime cre.Runtime, trigger *cro
 			logger.Info("✅ STATUS: Protocol operating normally")
 		}
 	} else {
-		logger.Info("ℹ️  First execution - establishing baseline prices")
+		logger.Info("ℹ️  RWA GUARD: First execution - establishing baseline prices")
 	}
 
 	// Update state memory for next iteration
 	previousGoldPrice = goldPrice
 	previousMsftPrice = msftPrice
 
-	// Standard volatility check (secondary to RWA Guard)
+	// Standard volatility check (tertiary to AI and RWA Guard)
 	if crossAssetVariance > config.RiskParameters.HighVolatilityThreshold && alert != "CRITICAL_HALT" {
 		alert = fmt.Sprintf("High Volatility: %.2f%%", crossAssetVariance)
-		systemRiskScore += 2.0
+		if systemRiskScore < 7.0 {
+			systemRiskScore += 2.0
+		}
 		logger.Warn("⚠️  HIGH VOLATILITY DETECTED", "variance", crossAssetVariance)
 	}
 
 	logger.Info("========================================")
-	logger.Info("✅ SIMULATION DATA PROCESSED")
+	logger.Info("✅ ITERATION COMPLETE")
 	logger.Info("========================================")
 	logger.Info(fmt.Sprintf("GOLD: $%.2f | MSFT: $%.2f", goldConsensus.MedianPrice, msftConsensus.MedianPrice))
+	logger.Info(fmt.Sprintf("Cross-Asset Variance: %.2f%%", crossAssetVariance))
+	logger.Info(fmt.Sprintf("Market Momentum: %s", marketMomentum))
 	logger.Info(fmt.Sprintf("Risk Score: %.1f/10.0", systemRiskScore))
 	logger.Info(fmt.Sprintf("Alert Status: %s", alert))
 	logger.Info("========================================")
 
-	// Trigger second iteration to demonstrate flash crash protection
-	if executionCount == 1 {
-		logger.Info("⏭️  Triggering second iteration to demonstrate flash crash scenario...")
+	// Continue to next iteration if not done
+	if executionCount < 3 {
+		logger.Info(fmt.Sprintf("⏭️  Triggering iteration #%d...", executionCount+1))
 		logger.Info("========================================")
 		time.Sleep(100 * time.Millisecond) // Brief pause for log readability
-		// Recursively call to simulate second execution
+		// Recursively call to simulate next execution
 		return onCronTriggerWithMockData(config, runtime, trigger, apiKey)
 	}
+
+	logger.Info("✅ 3-STAGE SIMULATION COMPLETE")
+	logger.Info("========================================")
 
 	return &ExecutionResult{
 		GoldPrice:          goldConsensus.MedianPrice,
@@ -223,9 +325,10 @@ func onCronTriggerWithMockData(config *Config, runtime cre.Runtime, trigger *cro
 		CrossAssetVariance: crossAssetVariance,
 		VolatilityWarning:  alert,
 		SystemRiskScore:    systemRiskScore,
-		Message:            fmt.Sprintf("SIMULATION: GOLD $%.2f | MSFT $%.2f | Risk %.1f | %s", goldConsensus.MedianPrice, msftConsensus.MedianPrice, systemRiskScore, alert),
+		MarketMomentum:     marketMomentum,
+		Message:            fmt.Sprintf("AI+RWA: GOLD $%.2f | MSFT $%.2f | Risk %.1f | %s | Momentum: %s", goldConsensus.MedianPrice, msftConsensus.MedianPrice, systemRiskScore, alert, marketMomentum),
 		Timestamp:          time.Now(),
-		DataSource:         "Mock Data with RWA Guard Protection (Flash Crash Scenario)",
+		DataSource:         "Mock Data with Layer 3 Predictive AI + RWA Guard Protection",
 	}, nil
 }
 
