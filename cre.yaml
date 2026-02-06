@@ -1,6 +1,9 @@
 version: "1.0"
 project:
   name: "auraprotocol"
+workflow:
+  path: "."
+  name: "aura-protocol-rwa-ingestion"
 default_target: "local"
 targets:
   local:

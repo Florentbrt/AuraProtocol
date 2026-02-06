@@ -1,168 +1,30 @@
-# AuraProtocol - RWA Predictive Guard Workflow
-# Chainlink Convergence 2026 - Risk & Compliance Track
-# Architecture: Multi-Source Data Ingestion with BFT Consensus
+name: "aura-protocol-rwa-ingestion"
+version: "2.0.0"
 
-name: aura-protocol-rwa-ingestion
-version: "1.0.0"
-description: "Multi-source RWA data ingestion with consensus-based volatility detection"
-
-# Secrets Configuration - Managed by CRE Runtime
-# These secrets are securely injected from secrets.yaml during execution
+# Secrets management
 secrets:
   - name: ALPHA_VANTAGE_API_KEY
     reference: ALPHA_VANTAGE_API_KEY
     required: true
-  - name: AURA_CONTRACT_ADDRESS
-    reference: AURA_CONTRACT_ADDRESS
-    required: false
-  - name: ALERT_WEBHOOK_URL
-    reference: ALERT_WEBHOOK_URL
-    required: false
 
+# HTTP Capability for external API calls
+capabilities:
+  - id: http-actions@1.0.0-alpha
+    permissions:
+      - domain: www.alphavantage.co
+        methods: [GET]
+        paths: ["/query"]
 
-# Workflow orchestration using CRE
-workflow:
-  # Step 1: Trigger - Time-based or event-based activation
-  triggers:
-    - type: cron
-      schedule: "*/5 * * * *"  # Every 5 minutes
-      description: "Periodic price refresh for GOLD and MSFT"
-    
-    - type: event
-      source: "chainlink-price-feed"
-      event: "PriceDeviationDetected"
-      description: "Emergency price check on significant market movements"
+# Triggers
+triggers:
+  - id: cron-trigger
+    type: cron
+    config:
+      schedule: "*/5 * * * *"
 
-  # Step 2: Capability - HTTP Multi-Source Data Fetching
-  capabilities:
-    - id: fetch-gold-prices
-      type: http
-      description: "Fetch GOLD prices from multiple Alpha Vantage endpoints with DON consensus"
-      config:
-        method: SendRequest
-        urls:
-          - url: "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=GLD&apikey=${ALPHA_VANTAGE_API_KEY}"
-            weight: 1.0
-          - url: "https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=XAU&to_currency=USD&apikey=${ALPHA_VANTAGE_API_KEY}"
-            weight: 0.8
-        consensus:
-          type: median
-          minimumResponses: 2
-          timeout: 30s
-      outputs:
-        - name: goldPrice
-          type: float64
-        - name: goldTimestamp
-          type: int64
-        - name: goldVolatility
-          type: string
-
-    - id: fetch-msft-prices
-      type: http
-      description: "Fetch MSFT prices as OpenAI proxy from multiple endpoints"
-      config:
-        method: SendRequest
-        urls:
-          - url: "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=MSFT&apikey=${ALPHA_VANTAGE_API_KEY}"
-            weight: 1.0
-          - url: "https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=MSFT&interval=5min&apikey=${ALPHA_VANTAGE_API_KEY}"
-            weight: 0.9
-        consensus:
-          type: median
-          minimumResponses: 2
-          timeout: 30s
-      outputs:
-        - name: msftPrice
-          type: float64
-        - name: msftTimestamp
-          type: int64
-        - name: msftVolatility
-          type: string
-
-    - id: compute-master-logic
-      type: compute
-      description: "Master Logic: Compute price variance and volatility warnings"
-      inputs:
-        - goldPrice
-        - msftPrice
-      config:
-        function: ComputeVariance
-        algorithm: "O(n log n) optimized median filtering"
-      outputs:
-        - name: priceVariance
-          type: float64
-        - name: volatilityWarning
-          type: string
-        - name: riskScore
-          type: float64
-
-  # Step 3: Actions - On-chain reporting and alerting
-  actions:
-    - id: report-to-contract
-      type: chainlink-function
-      description: "Report aggregated prices and risk scores to smart contract"
-      config:
-        contractAddress: "${AURA_CONTRACT_ADDRESS}"
-        method: "updatePriceData"
-        gasLimit: 500000
-      inputs:
-        - goldPrice
-        - msftPrice
-        - priceVariance
-        - volatilityWarning
-        - riskScore
-
-    - id: emit-alert
-      type: webhook
-      condition: "volatilityWarning == 'High Volatility'"
-      description: "Send alert to Risk & Compliance dashboard"
-      config:
-        url: "${ALERT_WEBHOOK_URL}"
-        method: POST
-        headers:
-          Content-Type: "application/json"
-
-# DON Configuration for Consensus
-don:
-  nodes:
-    minimumNodes: 4
-    quorumPercentage: 67
-  consensus:
-    mechanism: BFT
-    aggregationMethod: median
-    maxDeviation: 2.0
-
-# WASM Compatibility Settings
-wasm:
-  enabled: true
-  optimizationLevel: 3
-  memoryLimit: 512MB
-  prohibitedSyscalls:
-    - filesystem
-    - network_raw
-    - process_spawn
-
-# Performance Monitoring
-monitoring:
-  metrics:
-    - latency
-    - consensus_time
-    - price_variance
-    - node_agreement_rate
-  alerting:
+# Runtime configuration
+runtime:
+  wasm:
     enabled: true
-    thresholds:
-      latency_ms: 5000
-      consensus_failure_rate: 0.1
-
-# ===========================================================================
-# CRE CLI Target Settings
-# ===========================================================================
-# Settings for CRE workflow simulation and deployment
-local:
-  user-workflow:
-    workflow-name: "aura-protocol-rwa-ingestion"
-  workflow-artifacts:
-    workflow-path: "."
-    config-path: "./config.json"
-    secrets-path: "./secrets.yaml"
+    memory: 128MB
+  timeout: 30s
