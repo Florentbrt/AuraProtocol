@@ -8,87 +8,51 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
 /**
- * @title AuraVault
+ * @title AuraVault V2
  * @author AuraProtocol Team
- * @notice Institutional-grade ERC-4626 vault with AI-driven risk management
- * @dev Implements Read-Your-Writes pattern for CRE compatibility
- * 
- * SECURITY FEATURES:
- * 1. Role-based access control (only CRE DON can rebalance)
- * 2. Chainlink Price Feed integration with staleness checks
- * 3. Automatic circuit breaker for >20% single-tx movements
- * 4. Pausable for emergency stops
- * 5. Reentrancy protection
- * 6. AI decision logging for audit trail
+ * @notice Institutional-Grade ERC-4626 Vault for Chainlink Convergence 2026
+ * @dev Implements "Read-Your-Writes" support via internal RiskSnapshot storage.
  */
 contract AuraVault is ERC4626, AccessControl, Pausable, ReentrancyGuard {
     // ═══════════════════════════════════════════════════════════════
     // ROLES
     // ═══════════════════════════════════════════════════════════════
-    bytes32 public constant CRE_EXECUTOR_ROLE = keccak256("CRE_EXECUTOR_ROLE");
-    bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");
-    
+    bytes32 public constant CRE_ROLE = keccak256("CRE_ROLE");           // Role for the Automated Workflow
+    bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE"); // Role for Emergency Pause
+
     // ═══════════════════════════════════════════════════════════════
-    // STATE VARIABLES (Read-Your-Writes Pattern)
+    // STATE: "Read-Your-Writes" Support
     // ═══════════════════════════════════════════════════════════════
-    
     struct RiskSnapshot {
-        uint256 timestamp;
-        uint256 riskScore;        // Scaled by 1e18 (0.85 = 850000000000000000)
-        uint256 vixValue;         // Scaled by 1e2 (25.50 = 2550)
-        string aiRationale;       // LLM reasoning
-        string action;            // "DEFENSIVE", "NEUTRAL", "AGGRESSIVE"
+        uint256 lastUpdate;
+        uint256 riskScore;    // 0-100
+        string aiRationale;
     }
-    
-    RiskSnapshot public latestRisk;
-    uint256 public lastRebalanceTime;
-    uint256 public totalRebalances;
-    
-    // Price Feed for asset verification
+
+    RiskSnapshot public latestSnapshot;
+
+    // ═══════════════════════════════════════════════════════════════
+    // CONFIGURATION & IMMUTABLES
+    // ═══════════════════════════════════════════════════════════════
     AggregatorV3Interface public immutable assetPriceFeed;
-    
-    // Circuit Breaker Settings
-    uint256 public constant MAX_SINGLE_MOVEMENT_BPS = 2000; // 20%
-    uint256 public constant ORACLE_STALENESS_THRESHOLD = 3 hours;
-    
-    // Asset allocation (BPS = Basis Points, 10000 = 100%)
-    uint256 public defensiveAllocationBPS;  // e.g., 8000 = 80% in stablecoins
-    uint256 public aggressiveAllocationBPS; // e.g., 2000 = 20% in risk assets
-    
+    uint256 public constant ORACLE_HEARTBEAT = 3600; // 1 hour staleness check
+    uint256 public constant MAX_DEVIATION_BPS = 2000; // 20% circuit breaker
+
+    // Allocation in Basis Points (0-10000)
+    uint256 public currentRiskAllocation; // 0 means 100% defensive, 10000 means 100% risk
+
     // ═══════════════════════════════════════════════════════════════
     // EVENTS
     // ═══════════════════════════════════════════════════════════════
-    event RebalanceExecuted(
-        uint256 indexed timestamp,
-        uint256 riskScore,
-        string action,
-        uint256 newDefensiveBPS,
-        string aiRationale
-    );
-    
-    event CircuitBreakerTriggered(
-        uint256 attemptedMovement,
-        uint256 maxAllowed,
-        address executor
-    );
-    
-    event OracleStalenessDetected(
-        uint256 lastUpdate,
-        uint256 blockTimestamp
-    );
-    
+    event RebalanceExecuted(uint256 indexed timestamp, uint256 oldRisk, uint256 newRisk, string rationale);
+    event CircuitBreakerTriggered(uint256 tried, uint256 current, string msg);
+
     // ═══════════════════════════════════════════════════════════════
     // ERRORS
     // ═══════════════════════════════════════════════════════════════
-    error UnauthorizedExecutor();
     error OracleStale();
-    error MovementTooLarge(uint256 attempted, uint256 max);
-    error InvalidRiskScore();
-    error InvalidAllocation();
-    
-    // ═══════════════════════════════════════════════════════════════
-    // CONSTRUCTOR
-    // ═══════════════════════════════════════════════════════════════
+    error DeviationTooHigh(uint256 deviation);
+
     constructor(
         IERC20 _asset,
         string memory _name,
@@ -96,212 +60,99 @@ contract AuraVault is ERC4626, AccessControl, Pausable, ReentrancyGuard {
         address _priceFeed,
         address _creExecutor
     ) ERC4626(_asset) ERC20(_name, _symbol) {
-        require(_priceFeed != address(0), "Invalid price feed");
-        require(_creExecutor != address(0), "Invalid executor");
-        
         assetPriceFeed = AggregatorV3Interface(_priceFeed);
         
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(CRE_EXECUTOR_ROLE, _creExecutor);
+        _grantRole(CRE_ROLE, _creExecutor);
         _grantRole(GUARDIAN_ROLE, msg.sender);
-        
-        // Initialize with conservative allocation
-        defensiveAllocationBPS = 5000; // 50% defensive
-        aggressiveAllocationBPS = 5000; // 50% aggressive
+
+        // Initial State
+        latestSnapshot = RiskSnapshot(block.timestamp, 50, "Initial deployment");
+        currentRiskAllocation = 5000; // 50%
     }
-    
+
     // ═══════════════════════════════════════════════════════════════
-    // READ-YOUR-WRITES STATE GETTERS
+    // CORE LOGIC
     // ═══════════════════════════════════════════════════════════════
-    
+
     /**
-     * @notice Returns the latest risk assessment for CRE to read
-     * @dev CRE workflow calls this BEFORE making new decisions
+     * @notice Rebalances the vault based on AI risk assessment
+     * @dev Only callable by CRE_ROLE.
      */
-    function getLatestRiskSnapshot() external view returns (
-        uint256 timestamp,
-        uint256 riskScore,
-        uint256 vixValue,
-        string memory aiRationale,
-        string memory action
-    ) {
-        RiskSnapshot memory snapshot = latestRisk;
-        return (
-            snapshot.timestamp,
-            snapshot.riskScore,
-            snapshot.vixValue,
-            snapshot.aiRationale,
-            snapshot.action
-        );
-    }
-    
-    /**
-     * @notice Returns rebalance history for delta calculations
-     */
-    function getRebalanceStats() external view returns (
-        uint256 lastTime,
-        uint256 totalCount,
-        uint256 currentDefensiveBPS,
-        uint256 currentAggressiveBPS
-    ) {
-        return (
-            lastRebalanceTime,
-            totalRebalances,
-            defensiveAllocationBPS,
-            aggressiveAllocationBPS
-        );
-    }
-    
-    // ═══════════════════════════════════════════════════════════════
-    // CORE REBALANCE FUNCTION (Called by CRE DON)
-    // ═══════════════════════════════════════════════════════════════
-    
-    /**
-     * @notice AI-driven rebalance with institutional safeguards
-     * @param riskScore AI-calculated risk (0-1e18 scale)
-     * @param vixValue Current VIX index (scaled by 1e2)
-     * @param aiRationale LLM reasoning text
-     * @param suggestedAction "DEFENSIVE", "NEUTRAL", "AGGRESSIVE"
-     * 
-     * SECURITY CHECKS:
-     * 1. Role verification (only CRE DON)
-     * 2. Oracle price staleness check
-     * 3. Circuit breaker for large movements
-     * 4. Pausable emergency stop
-     */
-    function rebalance(
-        uint256 riskScore,
-        uint256 vixValue,
-        string calldata aiRationale,
-        string calldata suggestedAction
-    ) external nonReentrant whenNotPaused onlyRole(CRE_EXECUTOR_ROLE) {
-        // Validation: Risk score must be 0-100% (scaled to 1e18)
-        if (riskScore > 1e18) revert InvalidRiskScore();
+    function rebalance(uint256 newRiskScore, string calldata rationale) 
+        external 
+        onlyRole(CRE_ROLE) 
+        whenNotPaused 
+        nonReentrant 
+    {
+        // 1. SECURITY: Staleness Check
+        _checkOracleFreshness();
+
+        // Target allocation based on risk score (0-100 map to 0-10000 BPS)
+        // If Risk is 100 (Safe), Allocation is 0 (Risk Assets).
+        // If Risk is 0 (Safe), Allocation is 10000 (Risk Assets)? 
+        // Let's assume RiskScore 100 = High Risk Market = Go Defensive.
+        // RiskScore 0 = Low Risk Market = Go Aggressive.
         
-        // SECURITY CHECK 1: Verify asset price freshness
-        _verifyOracleFreshness();
-        
-        // Calculate new allocation based on AI suggestion
-        (uint256 newDefensiveBPS, uint256 newAggressiveBPS) = 
-            _calculateAllocation(riskScore, suggestedAction);
-        
-        // SECURITY CHECK 2: Circuit Breaker - prevent >20% single movement
-        uint256 movementBPS = _abs(int256(newDefensiveBPS) - int256(defensiveAllocationBPS));
-        if (movementBPS > MAX_SINGLE_MOVEMENT_BPS) {
-            emit CircuitBreakerTriggered(movementBPS, MAX_SINGLE_MOVEMENT_BPS, msg.sender);
-            _pause(); // Auto-pause on suspicious activity
-            revert MovementTooLarge(movementBPS, MAX_SINGLE_MOVEMENT_BPS);
-        }
-        
-        // Update state (Read-Your-Writes for next CRE execution)
-        latestRisk = RiskSnapshot({
-            timestamp: block.timestamp,
-            riskScore: riskScore,
-            vixValue: vixValue,
-            aiRationale: aiRationale,
-            action: suggestedAction
+        // Mapping: RiskScore (0-100) -> RiskExposure (10000 - 0)
+        // High Risk Score (100) -> 0% Risk Exposure (100% Stable)
+        uint256 targetAllocation = (100 - newRiskScore) * 100;
+
+        // 2. SECURITY: Circuit Breaker
+        _enforceCircuitBreaker(targetAllocation);
+
+        // 3. UPDATE STATE
+        uint256 oldRisk = latestSnapshot.riskScore;
+        latestSnapshot = RiskSnapshot({
+            lastUpdate: block.timestamp,
+            riskScore: newRiskScore,
+            aiRationale: rationale
         });
-        
-        lastRebalanceTime = block.timestamp;
-        totalRebalances++;
-        
-        // Apply new allocation
-        defensiveAllocationBPS = newDefensiveBPS;
-        aggressiveAllocationBPS = newAggressiveBPS;
-        
-        emit RebalanceExecuted(
-            block.timestamp,
-            riskScore,
-            suggestedAction,
-            newDefensiveBPS,
-            aiRationale
-        );
+
+        currentRiskAllocation = targetAllocation;
+
+        emit RebalanceExecuted(block.timestamp, oldRisk, newRiskScore, rationale);
     }
-    
-    // ═══════════════════════════════════════════════════════════════
-    // INTERNAL HELPERS
-    // ═══════════════════════════════════════════════════════════════
-    
-    /**
-     * @dev Verify Chainlink oracle is not stale
-     * Prevents Flash Crash exploitation via outdated prices
-     */
-    function _verifyOracleFreshness() internal view {
+
+    function _checkOracleFreshness() internal view {
         (, , , uint256 updatedAt, ) = assetPriceFeed.latestRoundData();
-        
-        if (block.timestamp - updatedAt > ORACLE_STALENESS_THRESHOLD) {
+        if (block.timestamp - updatedAt > ORACLE_HEARTBEAT) {
             revert OracleStale();
         }
     }
-    
-    /**
-     * @dev Calculate defensive/aggressive split based on AI risk score
-     * Higher risk → More defensive (stablecoins)
-     * Lower risk → More aggressive (yield assets)
-     */
-    function _calculateAllocation(
-        uint256 riskScore,
-        string calldata action
-    ) internal pure returns (uint256 defensiveBPS, uint256 aggressiveBPS) {
-        // riskScore is 0-1e18, where 1e18 = 100% risk
-        // Convert to BPS: (riskScore * 10000) / 1e18
-        
-        if (keccak256(bytes(action)) == keccak256("DEFENSIVE")) {
-            // High risk: 80-90% defensive
-            defensiveBPS = 8000 + ((riskScore * 1000) / 1e18);
-            if (defensiveBPS > 9000) defensiveBPS = 9000;
-        } else if (keccak256(bytes(action)) == keccak256("AGGRESSIVE")) {
-            // Low risk: 30-50% defensive
-            defensiveBPS = 3000 + ((riskScore * 2000) / 1e18);
-            if (defensiveBPS > 5000) defensiveBPS = 5000;
+
+    function _enforceCircuitBreaker(uint256 targetAlloc) internal {
+        // Calculate deviations in Basis Points relative to TOTAL capacity (10000)
+        // Simple logic: Is |target - current| > 2000?
+        uint256 diff;
+        if (targetAlloc > currentRiskAllocation) {
+            diff = targetAlloc - currentRiskAllocation;
         } else {
-            // Neutral: 50-70% defensive
-            defensiveBPS = 5000 + ((riskScore * 2000) / 1e18);
+            diff = currentRiskAllocation - targetAlloc;
         }
-        
-        aggressiveBPS = 10000 - defensiveBPS;
-        
-        if (defensiveBPS + aggressiveBPS != 10000) revert InvalidAllocation();
+
+        if (diff > MAX_DEVIATION_BPS) {
+            // Check if Guardian mode? Or just revert?
+            // "Add a modifier that reverts"
+            revert DeviationTooHigh(diff);
+        }
     }
-    
-    /**
-     * @dev Safe absolute value for int256
-     */
-    function _abs(int256 x) internal pure returns (uint256) {
-        return x >= 0 ? uint256(x) : uint256(-x);
+
+    // ═══════════════════════════════════════════════════════════════
+    // READ-YOUR-WRITES HELPERS
+    // ═══════════════════════════════════════════════════════════════
+    function getLatestSnapshot() external view returns (RiskSnapshot memory) {
+        return latestSnapshot;
     }
-    
+
     // ═══════════════════════════════════════════════════════════════
-    // EMERGENCY CONTROLS (Guardian Role)
+    // GUARDIAN CONTROLS
     // ═══════════════════════════════════════════════════════════════
-    
     function pause() external onlyRole(GUARDIAN_ROLE) {
         _pause();
     }
-    
+
     function unpause() external onlyRole(GUARDIAN_ROLE) {
         _unpause();
-    }
-    
-    // ═══════════════════════════════════════════════════════════════
-    // ERC4626 OVERRIDES (Add pause protection)
-    // ═══════════════════════════════════════════════════════════════
-    
-    function deposit(uint256 assets, address receiver) 
-        public 
-        override 
-        whenNotPaused 
-        returns (uint256) 
-    {
-        return super.deposit(assets, receiver);
-    }
-    
-    function withdraw(uint256 assets, address receiver, address owner)
-        public
-        override
-        whenNotPaused
-        returns (uint256)
-    {
-        return super.withdraw(assets, receiver, owner);
     }
 }

@@ -1,7 +1,5 @@
 {
   "vaultAddress": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
-  "vixAPIEndpoint": "https://api.cboe.com/vix/latest",
-  "aiEndpoint": "https://api.openai.com/v1/chat/completions",
-  "riskThreshold": 0.80,
-  "minRebalanceDelay": 3600
+  "vixEndpoint": "https://api.cboe.com/vix/latest",
+  "openAIEndpoint": "https://api.openai.com/v1/chat/completions"
 }
