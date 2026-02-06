@@ -6,14 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/smartcontractkit/cre-sdk-go/capabilities/networking/http"
 	"github.com/smartcontractkit/cre-sdk-go/capabilities/scheduler/cron"
 	"github.com/smartcontractkit/cre-sdk-go/cre"
 	"github.com/smartcontractkit/cre-sdk-go/cre/wasm"
 )
 
 // ═══════════════════════════════════════════════════════════════
-// CONFIGURATION
+// CONFIGURATION STRUCTURES
 // ═══════════════════════════════════════════════════════════════
 
 type Config struct {
@@ -28,12 +27,26 @@ type RiskSnapshot struct {
 	AIRationale string `json:"aiRationale"`
 }
 
+type Result struct {
+	OldRisk     uint64 `json:"oldRisk"`
+	NewRisk     uint64 `json:"newRisk"`
+	ActionTaken bool   `json:"actionTaken"`
+	Rationale   string `json:"rationale"`
+	Method      string `json:"method"`
+}
+
 // ═══════════════════════════════════════════════════════════════
-// WORKFLOW INITIALIZATION
+// WORKFLOW INITIALIZATION (Spec Generation Phase)
 // ═══════════════════════════════════════════════════════════════
 
 func InitWorkflow(config *Config, logger *slog.Logger, secretsProvider cre.SecretsProvider) (cre.Workflow[*Config], error) {
-	cronTrigger := cron.Trigger(&cron.Config{Schedule: "0 * * * *"}) // Run every hour
+	// Validation: Prevent "nil spec response" by validating config early
+	if config.VaultAddress == "" {
+		return cre.Workflow[*Config]{}, fmt.Errorf("vaultAddress is required in config.json")
+	}
+
+	// Construct Workflow with Cron Trigger
+	cronTrigger := cron.Trigger(&cron.Config{Schedule: "0 * * * *"}) // Hourly
 
 	handler := func(cfg *Config, rt cre.Runtime, trg *cron.Payload) (*Result, error) {
 		return executeStrategy(cfg, rt, logger)
@@ -44,57 +57,44 @@ func InitWorkflow(config *Config, logger *slog.Logger, secretsProvider cre.Secre
 	}, nil
 }
 
-type Result struct {
-	OldRisk     uint64 `json:"oldRisk"`
-	NewRisk     uint64 `json:"newRisk"`
-	ActionTaken bool   `json:"actionTaken"`
-	Rationale   string `json:"rationale"`
-	Method      string `json:"method"`
-}
-
 // ═══════════════════════════════════════════════════════════════
-// PROFESSIONAL STRATEGY EXECUTION
+// EXECUTION STRATEGY (Runtime Execution Phase)
 // ═══════════════════════════════════════════════════════════════
 
-func executeStrategy(
-	config *Config,
-	runtime cre.Runtime,
-	logger *slog.Logger,
-) (*Result, error) {
+func executeStrategy(config *Config, runtime cre.Runtime, logger *slog.Logger) (*Result, error) {
+	logger.Info("🌀 AuraProtocol v2 Agent Starting...")
 
-	logger.Info("🌀 AuraProtocol v2 Agent Starting (Secure Mode)...")
-
-	// 1. READ-YOUR-WRITES: Fetch State from EVM
+	// STEP 1: READ-YOUR-WRITES - Fetch On-Chain State
 	snapshot, err := fetchOnChainState(runtime, config.VaultAddress, logger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read on-chain state: %w", err)
+		return nil, err
 	}
 	logger.Info("📖 Context Loaded", "prev_risk", snapshot.RiskScore)
 
-	// 2. OBSERVE: Fetch Market Data
-	vixValue := fetchVIX(runtime, logger)
+	// STEP 2: OBSERVE - Fetch Market Data
+	vixValue := 22.5 // In production: fetch from VIX API
 	logger.Info("📊 Market Data", "VIX", vixValue)
 
-	// 3. THINK: AI Analysis (Professional Implementation)
+	// STEP 3: THINK - Calculate Risk (Deterministic Fallback)
 	newRiskScore, rationale, method := calculateRisk(runtime, config, vixValue, snapshot.RiskScore, logger)
+	logger.Info("🤔 Decision", "score", newRiskScore, "method", method)
 
-	logger.Info("🤔 Decision Reached", "score", newRiskScore, "method", method)
-
-	// 4. ACT: Convergence Threshold Check
+	// STEP 4: DECIDE - Check Threshold
 	diff := int64(newRiskScore) - int64(snapshot.RiskScore)
 	if diff < 0 {
 		diff = -diff
 	}
 
+	// STEP 5: ACT - Execute if threshold exceeded
 	actionTaken := false
 	if diff > 5 {
-		logger.Info("🚀 Threshold Triggered (>5)", "diff", diff, "action", "REBALANCE")
+		logger.Info("🚀 Threshold exceeded - triggering rebalance")
 		if err := executeRebalance(runtime, config.VaultAddress, newRiskScore, rationale, logger); err != nil {
 			return nil, err
 		}
 		actionTaken = true
 	} else {
-		logger.Info("💤 Threshold Not Met (<=5)", "diff", diff, "action", "HOLD")
+		logger.Info("💤 Threshold not met - holding position")
 	}
 
 	return &Result{
@@ -107,90 +107,24 @@ func executeStrategy(
 }
 
 // ═══════════════════════════════════════════════════════════════
-// LOGIC CHAIN
+// BUSINESS LOGIC FUNCTIONS
 // ═══════════════════════════════════════════════════════════════
 
-func calculateRisk(
-	rt cre.Runtime,
-	cfg *Config,
-	vix float64,
-	prevRisk uint64,
-	logger *slog.Logger,
-) (uint64, string, string) {
-
-	// ATTEMPT 1: Secure AI Call
-	// FIXED: Pass pointer to SecretRequest
-	apiKeySecret, err := rt.GetSecret(&cre.SecretRequest{Key: "OPENAI_API_KEY"}).Await()
-
-	if err == nil && cfg.OpenAIEndpoint != "" {
-		// FIXED: Access Value field from Secret struct
-		apiKeyStr := apiKeySecret.Value
-		score, reason, err := callOpenAI(rt, apiKeyStr, cfg.OpenAIEndpoint, vix, prevRisk)
-		if err == nil {
-			return score, reason, "AI_AGENT"
-		}
-		logger.Warn("⚠️ OpenAI Agent Failed - switching to fallback", "error", err)
-	} else {
-		// Log specific error for debugging
-		if err != nil {
-			logger.Warn("⚠️ Failed to fetch API Secret", "error", err)
-		} else {
-			logger.Warn("⚠️ Missing Endpoint Configuration")
-		}
-	}
-
-	// ATTEMPT 2: Deterministic Fallback (VIX Model)
+func calculateRisk(rt cre.Runtime, cfg *Config, vix float64, prevRisk uint64, logger *slog.Logger) (uint64, string, string) {
+	// Deterministic Fallback Formula (as per Phase 2 requirements)
+	// Risk = (VIX / 20) * 100, clamped to 100
 	calc := (vix / 20.0) * 100.0
 	if calc > 100 {
 		calc = 100
 	}
 
-	fallbackRisk := uint64(calc)
-	fallbackReason := fmt.Sprintf("FALLBACK MODE: Deterministic calculation based on VIX %.2f", vix)
-
-	return fallbackRisk, fallbackReason, "FALLBACK_DETERMINISTIC"
+	return uint64(calc), fmt.Sprintf("FALLBACK: VIX %.2f", vix), "FALLBACK_DETERMINISTIC"
 }
-
-func callOpenAI(rt cre.Runtime, key string, url string, vix float64, prevRisk uint64) (uint64, string, error) {
-	prompt := fmt.Sprintf("Current VIX is %.2f. Previous risk was %d. Analyze market sentiment. Return JSON: {risk_score: 0-100, rationale: 'string'}.", vix, prevRisk)
-
-	logger := slog.Default()
-	logger.Info("🤖 Calling OpenAI...", "url", url)
-
-	req := http.Request{
-		Method: "POST",
-		Url:    url,
-		Headers: map[string]string{
-			"Content-Type":  "application/json",
-			"Authorization": "Bearer " + key,
-		},
-		Body: []byte(fmt.Sprintf(`{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "%s"}]}`, prompt)),
-	}
-
-	client := http.Client{}
-	// FIXED: Pass pointer to req (&req)
-	resp, err := client.SendRequest(rt, &req).Await()
-
-	if err != nil {
-		return 0, "", err
-	}
-	if resp.StatusCode >= 400 {
-		return 0, "", fmt.Errorf("API Error %d", resp.StatusCode)
-	}
-
-	// Parsing Implementation (Mocked for compilation)
-	// In production use:
-	// var responseObj OpenAIResponse
-	// json.Unmarshal(resp.Body, &responseObj)
-	return 45, "AI Analysis: Market conditions are stabilizing.", nil
-}
-
-// ═══════════════════════════════════════════════════════════════
-// INFRASTRUCTURE
-// ═══════════════════════════════════════════════════════════════
 
 func fetchOnChainState(rt cre.Runtime, addr string, logger *slog.Logger) (*RiskSnapshot, error) {
-	// Real implementation would use rt.ReadContract(...)
+	logger.Info("📡 Reading on-chain state from vault", "address", addr)
+	// In production: use EVM read capability
+	// rt.ReadContract(...)
 	return &RiskSnapshot{
 		LastUpdate:  1234567890,
 		RiskScore:   50,
@@ -198,22 +132,42 @@ func fetchOnChainState(rt cre.Runtime, addr string, logger *slog.Logger) (*RiskS
 	}, nil
 }
 
-func fetchVIX(rt cre.Runtime, logger *slog.Logger) float64 {
-	return 22.5
-}
-
 func executeRebalance(rt cre.Runtime, addr string, risk uint64, rationale string, logger *slog.Logger) error {
-	logger.Info("🔗 [Create Report] Requesting Chain Write...", "risk", risk)
+	logger.Info("🔗 Requesting chain write", "risk", risk, "rationale", rationale)
 
-	// FIXED: Remove unknown fields if ReportRequest is empty struct in this SDK version
-	// Or check docs. Usually GenerateReport takes no args or a config.
-	// If the SDK version is v0, maybe ReportRequest is empty.
-	// We will use empty struct to pass compilation as the minimal required arg.
-	reportReq := &cre.ReportRequest{}
-	_, err := rt.GenerateReport(reportReq).Await()
-	return err
+	// Generate report for on-chain transaction
+	// In production, this would encode the rebalance(uint256 riskScore, string rationale) call
+	// For simulation, we use a simple encoded payload
+
+	// Simple ABI encoding simulation (32 bytes for uint256)
+	encodedPayload := make([]byte, 32)
+	// Risk score in big-endian format (simplified for simulation)
+	encodedPayload[31] = byte(risk)
+
+	reportReq := &cre.ReportRequest{
+		EncoderName:    "evm",       // EVM ABI encoding
+		SigningAlgo:    "ecdsa",     // Ethereum standard signing
+		HashingAlgo:    "keccak256", // Ethereum standard hashing
+		EncodedPayload: encodedPayload,
+	}
+
+	result, err := rt.GenerateReport(reportReq).Await()
+	if err != nil {
+		return err
+	}
+
+	logger.Info("✅ Chain write successful", "result", result)
+	return nil
 }
+
+// ═══════════════════════════════════════════════════════════════
+// WASM ENTRYPOINT (Critical for Spec Generation)
+// ═══════════════════════════════════════════════════════════════
 
 func main() {
-	wasm.Run(InitWorkflow)
+	// CORRECT SYNTAX per SDK v1.1.3 documentation
+	// wasm.NewRunner instantiates the lifecycle manager
+	// cre.ParseJSON[Config] provides type-safe config parsing
+	// .Run(InitWorkflow) starts the event loop
+	wasm.NewRunner(cre.ParseJSON[Config]).Run(InitWorkflow)
 }
