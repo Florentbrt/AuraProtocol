@@ -15,6 +15,19 @@ import (
 	"github.com/smartcontractkit/cre-sdk-go/cre/wasm"
 )
 
+// RWA GUARD CONSTANTS - Institutional-Grade Protection
+const (
+	MAX_DEVIANCE = 0.05 // 5% maximum price deviation before triggering shield
+)
+
+// STATE MEMORY - Track previous execution prices
+// In production, this would be stored in contract state or DON consensus memory
+var (
+	previousGoldPrice float64 = 0.0
+	previousMsftPrice float64 = 0.0
+	executionCount    int     = 0
+)
+
 type Config struct {
 	Consensus struct {
 		MaxVariancePercent float64 `json:"maxVariancePercent"`
@@ -81,21 +94,36 @@ func InitWorkflow(config *Config, logger *slog.Logger, secretsProvider cre.Secre
 func onCronTriggerWithMockData(config *Config, runtime cre.Runtime, trigger *cron.Payload, apiKey string) (*ExecutionResult, error) {
 	logger := runtime.Logger()
 
+	// Increment execution counter
+	executionCount++
+
 	logger.Info("========================================")
-	logger.Info("🚀 AuraProtocol - RWA Data Ingestion (SIMULATION MODE)")
+	logger.Info(fmt.Sprintf("🚀 AuraProtocol - RWA Guard Demonstration [Iteration #%d]", executionCount))
 	logger.Info("========================================")
 	logger.Info("⚠️  HTTP capabilities not available in local simulation")
-	logger.Info("📊 Using REALISTIC MOCK DATA for demonstration")
+	logger.Info("📊 Running MULTI-ITERATION FLASH CRASH SCENARIO")
 
-	// REALISTIC MOCK DATA - Based on real 2026 market conditions
-	// GOLD (GLD ETF) - typically trades around $230-250
-	goldPrice := 243.75
+	// FLASH CRASH SCENARIO SIMULATION
+	// Iteration 1: Normal market conditions
+	// Iteration 2: Flash crash - Gold drops by 26% to trigger RWA Guard
+	var goldPrice float64
+	var msftPrice float64
 
-	// MSFT - typically trades around $420-450
-	msftPrice := 438.20
+	if executionCount == 1 {
+		// First iteration: NORMAL MARKET CONDITIONS
+		goldPrice = 243.75
+		msftPrice = 438.20
+		logger.Info("📈 SCENARIO: Normal Market Conditions")
+	} else {
+		// Second+ iterations: FLASH CRASH DETECTED
+		goldPrice = 180.00 // 26% drop - way beyond 5% threshold
+		msftPrice = 438.20 // MSFT remains stable
+		logger.Info("💥 SCENARIO: Flash Crash Injected (Gold -26%)")
+		logger.Info("🔍 Testing RWA Guard activation...")
+	}
 
-	logger.Info(fmt.Sprintf("✅ GOLD Price (Mock): $%.2f", goldPrice))
-	logger.Info(fmt.Sprintf("✅ MSFT Price (Mock): $%.2f", msftPrice))
+	logger.Info(fmt.Sprintf("Current GOLD Price: $%.2f", goldPrice))
+	logger.Info(fmt.Sprintf("Current MSFT Price: $%.2f", msftPrice))
 
 	// Create price data structures
 	goldPrices := []*PriceData{{
@@ -120,7 +148,51 @@ func onCronTriggerWithMockData(config *Config, runtime cre.Runtime, trigger *cro
 	systemRiskScore := (goldConsensus.RiskScore + msftConsensus.RiskScore) / 2.0
 
 	alert := "Normal"
-	if crossAssetVariance > config.RiskParameters.HighVolatilityThreshold {
+
+	// ═══════════════════════════════════════════════════════════════
+	// 🛡️ RWA GUARD - PROTECTION CIRCUIT
+	// ═══════════════════════════════════════════════════════════════
+	if previousGoldPrice != 0.0 {
+		// Calculate price deviation from previous execution
+		goldDeviation := math.Abs(goldPrice-previousGoldPrice) / previousGoldPrice
+		msftDeviation := math.Abs(msftPrice-previousMsftPrice) / previousMsftPrice
+
+		logger.Info("========================================")
+		logger.Info("🛡️  RWA GUARD - Volatility Shield Status")
+		logger.Info("========================================")
+		logger.Info(fmt.Sprintf("Previous GOLD: $%.2f → Current: $%.2f", previousGoldPrice, goldPrice))
+		logger.Info(fmt.Sprintf("GOLD Deviation: %.2f%% (Threshold: %.2f%%)", goldDeviation*100, MAX_DEVIANCE*100))
+		logger.Info(fmt.Sprintf("MSFT Deviation: %.2f%%", msftDeviation*100))
+
+		// CHECK: Did price move beyond acceptable threshold?
+		if goldDeviation > MAX_DEVIANCE {
+			// 🚨 PROTECTION CIRCUIT ACTIVATED
+			systemRiskScore = 10.0 // CRITICAL - Maximum risk
+			alert = "CRITICAL_HALT"
+
+			logger.Error("🚨🚨🚨 CRITICAL ALERT 🚨🚨🚨")
+			logger.Error(fmt.Sprintf("🛡️ RWA GUARD ACTIVATED: Gold price deviation %.2f%% exceeds %.2f%% threshold!",
+				goldDeviation*100, MAX_DEVIANCE*100))
+			logger.Error("🛡️ RWA GUARD: Market manipulation or flash crash detected. Shielding protocol.")
+			logger.Error(fmt.Sprintf("🛡️ ACTION: SystemRiskScore → 10.0/10.0"))
+			logger.Error(fmt.Sprintf("🛡️ STATUS: %s", alert))
+			logger.Error("🚨 RECOMMENDATION: Halt trading, trigger circuit breaker, escalate to risk committee")
+			logger.Error("========================================")
+		} else {
+			logger.Info(fmt.Sprintf("✅ RWA GUARD: Price movement within acceptable range (%.2f%% < %.2f%%)",
+				goldDeviation*100, MAX_DEVIANCE*100))
+			logger.Info("✅ STATUS: Protocol operating normally")
+		}
+	} else {
+		logger.Info("ℹ️  First execution - establishing baseline prices")
+	}
+
+	// Update state memory for next iteration
+	previousGoldPrice = goldPrice
+	previousMsftPrice = msftPrice
+
+	// Standard volatility check (secondary to RWA Guard)
+	if crossAssetVariance > config.RiskParameters.HighVolatilityThreshold && alert != "CRITICAL_HALT" {
 		alert = fmt.Sprintf("High Volatility: %.2f%%", crossAssetVariance)
 		systemRiskScore += 2.0
 		logger.Warn("⚠️  HIGH VOLATILITY DETECTED", "variance", crossAssetVariance)
@@ -131,8 +203,17 @@ func onCronTriggerWithMockData(config *Config, runtime cre.Runtime, trigger *cro
 	logger.Info("========================================")
 	logger.Info(fmt.Sprintf("GOLD: $%.2f | MSFT: $%.2f", goldConsensus.MedianPrice, msftConsensus.MedianPrice))
 	logger.Info(fmt.Sprintf("Risk Score: %.1f/10.0", systemRiskScore))
+	logger.Info(fmt.Sprintf("Alert Status: %s", alert))
 	logger.Info("========================================")
-	logger.Info("ℹ️  To use LIVE data, deploy to a DON environment with HTTP capabilities")
+
+	// Trigger second iteration to demonstrate flash crash protection
+	if executionCount == 1 {
+		logger.Info("⏭️  Triggering second iteration to demonstrate flash crash scenario...")
+		logger.Info("========================================")
+		time.Sleep(100 * time.Millisecond) // Brief pause for log readability
+		// Recursively call to simulate second execution
+		return onCronTriggerWithMockData(config, runtime, trigger, apiKey)
+	}
 
 	return &ExecutionResult{
 		GoldPrice:          goldConsensus.MedianPrice,
@@ -142,9 +223,9 @@ func onCronTriggerWithMockData(config *Config, runtime cre.Runtime, trigger *cro
 		CrossAssetVariance: crossAssetVariance,
 		VolatilityWarning:  alert,
 		SystemRiskScore:    systemRiskScore,
-		Message:            fmt.Sprintf("SIMULATION: GOLD $%.2f | MSFT $%.2f | Risk %.1f", goldConsensus.MedianPrice, msftConsensus.MedianPrice, systemRiskScore),
+		Message:            fmt.Sprintf("SIMULATION: GOLD $%.2f | MSFT $%.2f | Risk %.1f | %s", goldConsensus.MedianPrice, msftConsensus.MedianPrice, systemRiskScore, alert),
 		Timestamp:          time.Now(),
-		DataSource:         "Mock Data (Local Simulation - HTTP not available in WASM simulation)",
+		DataSource:         "Mock Data with RWA Guard Protection (Flash Crash Scenario)",
 	}, nil
 }
 
