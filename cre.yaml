@@ -1,0 +1,7 @@
+version: "1.0"
+project:
+  name: "auraprotocol"
+default_target: "local"
+targets:
+  local:
+    type: "simulation"
