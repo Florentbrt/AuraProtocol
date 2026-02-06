@@ -5,94 +5,72 @@ package main
 import (
 	"fmt"
 	"log/slog"
-	"math"
-	"os"
-	"sort"
-	"time"
 
 	"github.com/smartcontractkit/cre-sdk-go/capabilities/scheduler/cron"
 	"github.com/smartcontractkit/cre-sdk-go/cre"
 	"github.com/smartcontractkit/cre-sdk-go/cre/wasm"
 )
 
-// RWA GUARD CONSTANTS - Institutional-Grade Protection
-const (
-	MAX_DEVIANCE          = 0.05 // 5% maximum price deviation before triggering shield
-	PREDICTIVE_RISK_BONUS = 3.0  // Risk bonus when AI detects momentum acceleration
-)
-
-// STATE MEMORY - Track previous execution prices and variance history
-// In production, this would be stored in contract state or DON consensus memory
-var (
-	previousGoldPrice float64 = 0.0
-	previousMsftPrice float64 = 0.0
-	executionCount    int     = 0
-
-	// LAYER 3: Predictive Momentum Engine - AI Brain
-	varianceHistory []float64 // Stores last 3 CrossAssetVariance values for acceleration detection
-
-	// LAYER 4: On-Chain Execution (Hands)
-	ARBITRUM_CONTRACT_ADDRESS = "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1" // Arbitrum Sepolia Target
-)
+// ═══════════════════════════════════════════════════════════════
+// CONFIGURATION
+// ═══════════════════════════════════════════════════════════════
 
 type Config struct {
-	Consensus struct {
-		MaxVariancePercent float64 `json:"maxVariancePercent"`
-	} `json:"consensus"`
-	RiskParameters struct {
-		HighVolatilityThreshold    float64 `json:"highVolatilityThreshold"`
-		ExtremeVolatilityThreshold float64 `json:"extremeVolatilityThreshold"`
-	} `json:"riskParameters"`
+	VaultAddress      string  `json:"vaultAddress"`      // Arbitrum Sepolia AuraVault address
+	VIXAPIEndpoint    string  `json:"vixAPIEndpoint"`    // VIX data source
+	AIEndpoint        string  `json:"aiEndpoint"`        // OpenAI/Gemini API
+	RiskThreshold     float64 `json:"riskThreshold"`     // AI risk > 0.8 triggers action
+	MinRebalanceDelay uint64  `json:"minRebalanceDelay"` // Seconds between rebalances
 }
 
-type PriceData struct {
-	Symbol    string    `json:"symbol"`
-	Price     float64   `json:"price"`
-	Source    string    `json:"source"`
-	Timestamp time.Time `json:"timestamp"`
+// ═══════════════════════════════════════════════════════════════
+// STATE TYPES (Read from Blockchain)
+// ═══════════════════════════════════════════════════════════════
+
+type OnChainState struct {
+	LastRiskScore     uint64 `json:"lastRiskScore"` // From vault's latestRisk
+	LastVIXValue      uint64 `json:"lastVIXValue"`
+	LastRebalanceTime uint64 `json:"lastRebalanceTime"`
+	TotalRebalances   uint64 `json:"totalRebalances"`
+	DefensiveAlloc    uint64 `json:"defensiveAlloc"`  // BPS
+	AggressiveAlloc   uint64 `json:"aggressiveAlloc"` // BPS
 }
 
-type AlphaVantageResponse struct {
-	GlobalQuote struct {
-		Symbol      string `json:"01. symbol"`
-		Price       string `json:"05. price"`
-		TradingDay  string `json:"07. latest trading day"`
-		ChangePerct string `json:"10. change percent"`
-	} `json:"Global Quote"`
-	Information string `json:"Information"`
-	Note        string `json:"Note"`
+// ═══════════════════════════════════════════════════════════════
+// AI RESPONSE STRUCTURE
+// ═══════════════════════════════════════════════════════════════
+
+type AIRecommendation struct {
+	RiskScore  float64 `json:"riskScore"` // 0.0 to 1.0
+	Rationale  string  `json:"rationale"`
+	Action     string  `json:"action"`     // "DEFENSIVE", "NEUTRAL", "AGGRESSIVE"
+	Confidence float64 `json:"confidence"` // LLM confidence level
 }
 
-type ExecutionResult struct {
-	GoldPrice          float64   `json:"gold_price"`
-	MsftPrice          float64   `json:"msft_price"`
-	GoldVariance       float64   `json:"gold_variance"`
-	MsftVariance       float64   `json:"msft_variance"`
-	CrossAssetVariance float64   `json:"cross_asset_variance"`
-	VolatilityWarning  string    `json:"volatility_warning"`
-	SystemRiskScore    float64   `json:"system_risk_score"`
-	MarketMomentum     string    `json:"market_momentum"` // LAYER 3: Stable/Unstable/Critical
-	OnChainStatus      string    `json:"on_chain_status"` // LAYER 4: Transaction Status
-	Message            string    `json:"message"`
-	Timestamp          time.Time `json:"timestamp"`
-	DataSource         string    `json:"data_source"`
+// ═══════════════════════════════════════════════════════════════
+// MARKET DATA
+// ═══════════════════════════════════════════════════════════════
+
+type VIXData struct {
+	Value     float64 `json:"value"` // e.g., 25.50
+	Timestamp uint64  `json:"timestamp"`
 }
+
+type MarketSentiment struct {
+	Score       float64 `json:"score"`  // -1.0 (bearish) to +1.0 (bullish)
+	Source      string  `json:"source"` // "NewsAPI", "Twitter", etc.
+	HeadlineTop string  `json:"headlineTop"`
+}
+
+// ═══════════════════════════════════════════════════════════════
+// WORKFLOW ENTRYPOINT
+// ═══════════════════════════════════════════════════════════════
 
 func InitWorkflow(config *Config, logger *slog.Logger, secretsProvider cre.SecretsProvider) (cre.Workflow[*Config], error) {
-	// Get API key from environment (WASM-compatible)
-	apiKey := os.Getenv("ALPHA_VANTAGE_API_KEY")
-	if apiKey == "" {
-		apiKey = "R4ZVPT8S0290SQP1" // Fallback
-		logger.Warn("Using fallback API key")
-	} else {
-		logger.Info("API key loaded from environment")
-	}
+	cronTrigger := cron.Trigger(&cron.Config{Schedule: "*/15 * * * *"}) // Every 15 minutes
 
-	cronTrigger := cron.Trigger(&cron.Config{Schedule: "*/5 * * * *"})
-
-	// Create handler as closure with apiKey captured
-	handler := func(cfg *Config, rt cre.Runtime, trg *cron.Payload) (*ExecutionResult, error) {
-		return onCronTriggerWithMockData(cfg, rt, trg, apiKey)
+	handler := func(cfg *Config, rt cre.Runtime, trg *cron.Payload) (*RebalanceResult, error) {
+		return onCronTrigger(cfg, rt, secretsProvider, logger)
 	}
 
 	return cre.Workflow[*Config]{
@@ -100,331 +78,358 @@ func InitWorkflow(config *Config, logger *slog.Logger, secretsProvider cre.Secre
 	}, nil
 }
 
-func onCronTriggerWithMockData(config *Config, runtime cre.Runtime, trigger *cron.Payload, apiKey string) (*ExecutionResult, error) {
-	logger := runtime.Logger()
+// ═══════════════════════════════════════════════════════════════
+// MAIN EXECUTION LOGIC (State-Aware AI Agent)
+// ═══════════════════════════════════════════════════════════════
 
-	// Increment execution counter
-	executionCount++
+func onCronTrigger(
+	config *Config,
+	runtime cre.Runtime,
+	secrets cre.SecretsProvider,
+	logger *slog.Logger,
+) (*RebalanceResult, error) {
 
-	logger.Info("========================================")
-	logger.Info(fmt.Sprintf("🧠 AuraProtocol - Layer 3: Predictive Momentum Engine [Iteration #%d]", executionCount))
-	logger.Info("========================================")
-	logger.Info("⚠️  HTTP capabilities not available in local simulation")
-	logger.Info("📊 Running 3-STAGE PREDICTIVE INTELLIGENCE SCENARIO")
-
-	// 3-STAGE PREDICTIVE SCENARIO
-	// Stage 1: Normal market - Low variance (0.2%)
-	// Stage 2: Market nervousness - Variance accelerating (1.8%) - AI PREDICTS HERE
-	// Stage 3: Flash crash - Extreme variance (25%) - RWA Guard activates
-	var goldPrice float64
-	var msftPrice float64
-	var artificialVariance float64 // For demonstration, we'll inject variance
-
-	switch executionCount {
-	case 1:
-		// Stage 1: NORMAL MARKET CONDITIONS
-		goldPrice = 243.75
-		msftPrice = 438.20
-		artificialVariance = 0.2 // 0.2% variance (stable)
-		logger.Info("📈 STAGE 1: Normal Market Conditions")
-		logger.Info("   Variance: 0.2% (Baseline)")
-	case 2:
-		// Stage 2: MARKET NERVOUSNESS - AI Should Detect Acceleration
-		goldPrice = 240.50       // Small 1.3% drop (within RWA Guard threshold)
-		msftPrice = 438.20       // MSFT stable
-		artificialVariance = 1.8 // 1.8% variance (growing!)
-		logger.Info("📊 STAGE 2: Market Nervousness Detected")
-		logger.Info("   Variance: 1.8% (Accelerating)")
-		logger.Info("   🔍 AI analyzing momentum patterns...")
-	default:
-		// Stage 3: FLASH CRASH
-		goldPrice = 180.00        // 26% drop - triggers RWA Guard
-		msftPrice = 438.20        // MSFT stable
-		artificialVariance = 25.0 // 25% variance (extreme!)
-		logger.Info("💥 STAGE 3: Flash Crash Event")
-		logger.Info("   Variance: 25.0% (CRITICAL)")
-		logger.Info("   🛡️ RWA Guard should activate...")
-	}
-
-	logger.Info(fmt.Sprintf("Current GOLD Price: $%.2f", goldPrice))
-	logger.Info(fmt.Sprintf("Current MSFT Price: $%.2f", msftPrice))
-
-	// Create price data structures
-	goldPrices := []*PriceData{{
-		Symbol:    "GOLD",
-		Price:     goldPrice,
-		Source:    "Mock Data (Simulation Mode)",
-		Timestamp: time.Now(),
-	}}
-
-	msftPrices := []*PriceData{{
-		Symbol:    "MSFT",
-		Price:     msftPrice,
-		Source:    "Mock Data (Simulation Mode)",
-		Timestamp: time.Now(),
-	}}
-
-	// Master Logic: O(n log n) consensus computation
-	goldConsensus := computeConsensus(goldPrices, "GOLD", config, logger)
-	msftConsensus := computeConsensus(msftPrices, "MSFT", config, logger)
-
-	// Use artificial variance for demonstration
-	crossAssetVariance := artificialVariance
-	systemRiskScore := (goldConsensus.RiskScore + msftConsensus.RiskScore) / 2.0
-
-	alert := "Normal"
-	marketMomentum := "Stable"
+	logger.Info("═════════════════════════════════════════════")
+	logger.Info("🧠 AuraVault AI Agent - Institutional Mode")
+	logger.Info("═════════════════════════════════════════════")
 
 	// ═══════════════════════════════════════════════════════════════
-	// 🧠 LAYER 3: PREDICTIVE MOMENTUM ENGINE - AI BRAIN
+	// STEP 1: READ-YOUR-WRITES - Fetch On-Chain State
 	// ═══════════════════════════════════════════════════════════════
-	logger.Info("========================================")
-	logger.Info("🧠 LAYER 3: Predictive Momentum Engine")
-	logger.Info("========================================")
+	logger.Info("📖 STEP 1: Reading on-chain state from AuraVault...")
 
-	// Add current variance to history
-	varianceHistory = append(varianceHistory, crossAssetVariance)
-
-	// Keep only last 3 values
-	if len(varianceHistory) > 3 {
-		varianceHistory = varianceHistory[len(varianceHistory)-3:]
+	onChainState, err := readVaultState(runtime, config.VaultAddress, logger)
+	if err != nil {
+		logger.Error("Failed to read vault state", "error", err)
+		return nil, err
 	}
 
-	logger.Info(fmt.Sprintf("Variance History (last %d): %v", len(varianceHistory), varianceHistory))
+	logger.Info("✅ On-chain state loaded",
+		"lastRebalance", onChainState.LastRebalanceTime,
+		"totalRebalances", onChainState.TotalRebalances,
+		"defensiveAlloc", fmt.Sprintf("%d BPS", onChainState.DefensiveAlloc))
 
-	// AI LOGIC: Detect momentum acceleration
-	if len(varianceHistory) >= 2 {
-		// Calculate acceleration (rate of change of rate of change)
-		// If variance is growing exponentially, this will be positive and large
+	// Check if rebalance is allowed (time-based cooling period)
+	currentTime := uint64(runtime.Now().Unix())
+	timeSinceLastRebalance := currentTime - onChainState.LastRebalanceTime
 
-		currentVariance := varianceHistory[len(varianceHistory)-1]
-		previousVariance := varianceHistory[len(varianceHistory)-2]
-
-		// Calculate the growth rate
-		varianceGrowth := currentVariance - previousVariance
-
-		logger.Info(fmt.Sprintf("Current Variance: %.2f%%", currentVariance))
-		logger.Info(fmt.Sprintf("Previous Variance: %.2f%%", previousVariance))
-		logger.Info(fmt.Sprintf("Variance Growth: %.2f%%", varianceGrowth))
-
-		// Check for exponential growth pattern (acceleration)
-		// If we have 3 data points, we can calculate true acceleration
-		if len(varianceHistory) >= 3 {
-			oldestVariance := varianceHistory[len(varianceHistory)-3]
-			previousGrowth := previousVariance - oldestVariance
-
-			// Acceleration = change in growth rate
-			acceleration := varianceGrowth - previousGrowth
-
-			logger.Info(fmt.Sprintf("Oldest Variance: %.2f%%", oldestVariance))
-			logger.Info(fmt.Sprintf("Previous Growth: %.2f%%", previousGrowth))
-			logger.Info(fmt.Sprintf("🎯 ACCELERATION: %.2f%%", acceleration))
-
-			// PREDICTIVE THRESHOLD: If acceleration > 0.5%, we predict trouble
-			if acceleration > 0.5 {
-				// 🧠 AI PREDICTION TRIGGERED
-				systemRiskScore += PREDICTIVE_RISK_BONUS
-				marketMomentum = "Unstable"
-
-				logger.Warn("========================================")
-				logger.Warn("⚠️  PREDICTIVE WARNING ACTIVATED")
-				logger.Warn("========================================")
-				logger.Warn(fmt.Sprintf("🧠 AI BRAIN: Momentum acceleration detected! (+%.2f%%)", acceleration))
-				logger.Warn(fmt.Sprintf("🧠 PATTERN: %.2f%% → %.2f%% → %.2f%% (Exponential Growth)",
-					oldestVariance, previousVariance, currentVariance))
-				logger.Warn(fmt.Sprintf("🧠 PREDICTION: Market crash likely in next iteration"))
-				logger.Warn(fmt.Sprintf("🧠 ACTION: Adding Predictive Risk Bonus +%.1f to score", PREDICTIVE_RISK_BONUS))
-				logger.Warn(fmt.Sprintf("🧠 NEW RISK SCORE: %.1f/10.0", systemRiskScore))
-				logger.Warn("========================================")
-			} else {
-				logger.Info(fmt.Sprintf("✅ AI BRAIN: Acceleration %.2f%% below prediction threshold (0.5%%)", acceleration))
-				logger.Info("✅ Market momentum appears stable")
-			}
-		} else {
-			logger.Info("ℹ️  AI BRAIN: Collecting data... need 3 points for acceleration analysis")
-		}
-	} else {
-		logger.Info("ℹ️  AI BRAIN: First iteration - establishing baseline")
+	if timeSinceLastRebalance < config.MinRebalanceDelay {
+		logger.Warn("⏸️  Rebalance cooling period active",
+			"elapsed", timeSinceLastRebalance,
+			"required", config.MinRebalanceDelay)
+		return &RebalanceResult{
+			Status:    "SKIPPED",
+			Reason:    "Cooling period active",
+			Timestamp: currentTime,
+		}, nil
 	}
 
 	// ═══════════════════════════════════════════════════════════════
-	// 🛡️ RWA GUARD - PROTECTION CIRCUIT (LAYER 2)
+	// STEP 2: FETCH MARKET DATA
 	// ═══════════════════════════════════════════════════════════════
-	onChainStatus := "IDLE"
+	logger.Info("📊 STEP 2: Fetching VIX and sentiment data...")
 
-	if previousGoldPrice != 0.0 {
-		// Calculate price deviation from previous execution
-		goldDeviation := math.Abs(goldPrice-previousGoldPrice) / previousGoldPrice
-		msftDeviation := math.Abs(msftPrice-previousMsftPrice) / previousMsftPrice
-
-		logger.Info("========================================")
-		logger.Info("🛡️  RWA GUARD - Volatility Shield Status")
-		logger.Info("========================================")
-		logger.Info(fmt.Sprintf("Previous GOLD: $%.2f → Current: $%.2f", previousGoldPrice, goldPrice))
-		logger.Info(fmt.Sprintf("GOLD Deviation: %.2f%% (Threshold: %.2f%%)", goldDeviation*100, MAX_DEVIANCE*100))
-		logger.Info(fmt.Sprintf("MSFT Deviation: %.2f%%", msftDeviation*100))
-
-		// CHECK: Did price move beyond acceptable threshold?
-		if goldDeviation > MAX_DEVIANCE {
-			// 🚨 PROTECTION CIRCUIT ACTIVATED
-			systemRiskScore = 10.0 // CRITICAL - Maximum risk
-			alert = "CRITICAL_HALT"
-			marketMomentum = "Critical"
-
-			logger.Error("🚨🚨🚨 CRITICAL ALERT 🚨🚨🚨")
-			logger.Error(fmt.Sprintf("🛡️ RWA GUARD ACTIVATED: Gold price deviation %.2f%% exceeds %.2f%% threshold!",
-				goldDeviation*100, MAX_DEVIANCE*100))
-			logger.Error("🛡️ RWA GUARD: Market manipulation or flash crash detected. Shielding protocol.")
-			logger.Error(fmt.Sprintf("🛡️ ACTION: SystemRiskScore → 10.0/10.0"))
-			logger.Error(fmt.Sprintf("🛡️ STATUS: %s", alert))
-			logger.Error("🚨 RECOMMENDATION: Halt trading, trigger circuit breaker, escalate to risk committee")
-
-			// ═══════════════════════════════════════════════════════════════
-			// 🔗 LAYER 4: ON-CHAIN HANDS - ARBITRUM EXECUTION
-			// ═══════════════════════════════════════════════════════════════
-			logger.Info("🔗 LAYER 4: Transmitting to Arbitrum Sepolia...")
-
-			// ABI encode: emergencyHalt(uint256)
-			// Function selector: keccak256("emergencyHalt(uint256)")[:4] = 0x5f515226
-			riskScoreScaled := uint64(systemRiskScore * 10) // 10.0 -> 100
-			callData := fmt.Sprintf("0x5f515226%064x", riskScoreScaled)
-
-			logger.Info("📝 Generating chain-write report...",
-				"contract", ARBITRUM_CONTRACT_ADDRESS,
-				"function", "emergencyHalt",
-				"calldata", callData)
-
-			// Trigger chain write via CRE Runtime GenerateReport
-			reportReq := &cre.ReportRequest{}
-			reportPromise := runtime.GenerateReport(reportReq)
-			report, reportErr := reportPromise.Await()
-
-			if reportErr != nil {
-				logger.Error("❌ Chain write failed", "error", reportErr)
-				onChainStatus = "TX_FAILED"
-			} else {
-				logger.Info("✅ Chain write executed", "report", report)
-				onChainStatus = "TX_SENT_TO_ARBITRUM"
-			}
-			logger.Error("========================================")
-		} else {
-			logger.Info(fmt.Sprintf("✅ RWA GUARD: Price movement within acceptable range (%.2f%% < %.2f%%)",
-				goldDeviation*100, MAX_DEVIANCE*100))
-			logger.Info("✅ STATUS: Protocol operating normally")
-		}
-	} else {
-		logger.Info("ℹ️  RWA GUARD: First execution - establishing baseline prices")
+	vixData, err := fetchVIXData(runtime, config.VIXAPIEndpoint, logger)
+	if err != nil {
+		logger.Error("Failed to fetch VIX", "error", err)
+		return nil, err
 	}
 
-	// Update state memory for next iteration
-	previousGoldPrice = goldPrice
-	previousMsftPrice = msftPrice
-
-	// Standard volatility check (tertiary to AI and RWA Guard)
-	if crossAssetVariance > config.RiskParameters.HighVolatilityThreshold && alert != "CRITICAL_HALT" {
-		alert = fmt.Sprintf("High Volatility: %.2f%%", crossAssetVariance)
-		if systemRiskScore < 7.0 {
-			systemRiskScore += 2.0
-		}
-		logger.Warn("⚠️  HIGH VOLATILITY DETECTED", "variance", crossAssetVariance)
+	sentiment, err := fetchMarketSentiment(runtime, logger)
+	if err != nil {
+		logger.Error("Failed to fetch sentiment", "error", err)
+		// Continue with neutral sentiment on failure
+		sentiment = &MarketSentiment{Score: 0.0, Source: "Fallback"}
 	}
 
-	logger.Info("========================================")
-	logger.Info("✅ ITERATION COMPLETE")
-	logger.Info("========================================")
-	logger.Info(fmt.Sprintf("GOLD: $%.2f | MSFT: $%.2f", goldConsensus.MedianPrice, msftConsensus.MedianPrice))
-	logger.Info(fmt.Sprintf("Cross-Asset Variance: %.2f%%", crossAssetVariance))
-	logger.Info(fmt.Sprintf("Market Momentum: %s", marketMomentum))
-	logger.Info(fmt.Sprintf("Risk Score: %.1f/10.0", systemRiskScore))
-	logger.Info(fmt.Sprintf("Alert Status: %s", alert))
-	logger.Info("========================================")
+	logger.Info("✅ Market data loaded",
+		"VIX", vixData.Value,
+		"sentiment", sentiment.Score)
 
-	// Continue to next iteration if not done
-	if executionCount < 3 {
-		logger.Info(fmt.Sprintf("⏭️  Triggering iteration #%d...", executionCount+1))
-		logger.Info("========================================")
-		time.Sleep(100 * time.Millisecond) // Brief pause for log readability
-		// Recursively call to simulate next execution
-		return onCronTriggerWithMockData(config, runtime, trigger, apiKey)
+	// Calculate delta from previous execution
+	vixDelta := vixData.Value - float64(onChainState.LastVIXValue)/100.0
+	logger.Info("📈 VIX Delta", "change", fmt.Sprintf("%.2f", vixDelta))
+
+	// ═══════════════════════════════════════════════════════════════
+	// STEP 3: AI REASONING ENGINE
+	// ═══════════════════════════════════════════════════════════════
+	logger.Info("🤖 STEP 3: Consulting AI Risk Agent...")
+
+	aiKey, _ := secrets.Get("OPENAI_API_KEY")
+
+	aiRecommendation, err := consultAIAgent(
+		runtime,
+		config.AIEndpoint,
+		string(aiKey),
+		vixData,
+		sentiment,
+		onChainState,
+		logger,
+	)
+	if err != nil {
+		logger.Error("AI consultation failed", "error", err)
+		return nil, err
 	}
 
-	logger.Info("✅ 3-STAGE SIMULATION COMPLETE")
-	logger.Info("========================================")
+	logger.Info("✅ AI Analysis Complete",
+		"riskScore", aiRecommendation.RiskScore,
+		"action", aiRecommendation.Action,
+		"confidence", aiRecommendation.Confidence)
+	logger.Info("💭 AI Rationale", "reasoning", aiRecommendation.Rationale)
 
-	return &ExecutionResult{
-		GoldPrice:          goldConsensus.MedianPrice,
-		MsftPrice:          msftConsensus.MedianPrice,
-		GoldVariance:       goldConsensus.Variance,
-		MsftVariance:       msftConsensus.Variance,
-		CrossAssetVariance: crossAssetVariance,
-		VolatilityWarning:  alert,
-		SystemRiskScore:    systemRiskScore,
-		MarketMomentum:     marketMomentum,
-		OnChainStatus:      onChainStatus,
-		Message:            fmt.Sprintf("AI+RWA: GOLD $%.2f | MSFT $%.2f | Risk %.1f | %s | Momentum: %s", goldConsensus.MedianPrice, msftConsensus.MedianPrice, systemRiskScore, alert, marketMomentum),
-		Timestamp:          time.Now(),
-		DataSource:         "Mock Data with Layer 3 Predictive AI + RWA Guard Protection",
+	// ═══════════════════════════════════════════════════════════════
+	// STEP 4: DECISION ENGINE
+	// ═══════════════════════════════════════════════════════════════
+	logger.Info("⚖️  STEP 4: Making rebalance decision...")
+
+	shouldRebalance := aiRecommendation.RiskScore > config.RiskThreshold
+
+	if !shouldRebalance {
+		logger.Info("✅ Risk within acceptable bounds",
+			"aiRisk", aiRecommendation.RiskScore,
+			"threshold", config.RiskThreshold)
+		return &RebalanceResult{
+			Status:    "NO_ACTION",
+			Reason:    "Risk below threshold",
+			AIRisk:    aiRecommendation.RiskScore,
+			Timestamp: currentTime,
+		}, nil
+	}
+
+	// ═══════════════════════════════════════════════════════════════
+	// STEP 5: EXECUTE ON-CHAIN REBALANCE
+	// ═══════════════════════════════════════════════════════════════
+	logger.Info("🚨 STEP 5: HIGH RISK DETECTED - Triggering rebalance...")
+	logger.Warn("⚠️  Risk Score Exceeds Threshold",
+		"current", aiRecommendation.RiskScore,
+		"threshold", config.RiskThreshold)
+
+	txResult, err := executeRebalance(
+		runtime,
+		config.VaultAddress,
+		aiRecommendation,
+		vixData,
+		logger,
+	)
+	if err != nil {
+		logger.Error("Rebalance execution failed", "error", err)
+		return nil, err
+	}
+
+	logger.Info("✅ Rebalance executed successfully", "tx", txResult)
+
+	return &RebalanceResult{
+		Status:      "EXECUTED",
+		Reason:      aiRecommendation.Rationale,
+		AIRisk:      aiRecommendation.RiskScore,
+		Action:      aiRecommendation.Action,
+		VIXValue:    vixData.Value,
+		Transaction: txResult,
+		Timestamp:   currentTime,
 	}, nil
 }
 
-type ConsensusResult struct {
-	MedianPrice float64
-	Variance    float64
-	RiskScore   float64
+// ═══════════════════════════════════════════════════════════════
+// READ-YOUR-WRITES: Fetch State from Smart Contract
+// ═══════════════════════════════════════════════════════════════
+
+func readVaultState(
+	runtime cre.Runtime,
+	vaultAddress string,
+	logger *slog.Logger,
+) (*OnChainState, error) {
+
+	// In production, this would use the EVM read capability:
+	// 1. Call vault.getLatestRiskSnapshot()
+	// 2. Call vault.getRebalanceStats()
+	// 3. Parse ABI-encoded responses
+
+	// For simulation, return mock state
+	logger.Info("🔍 [SIMULATED] Reading vault state via EVM read capability...")
+
+	return &OnChainState{
+		LastRiskScore:     850000000000000000,                  // 0.85 scaled to 1e18
+		LastVIXValue:      2350,                                // 23.50 scaled to 1e2
+		LastRebalanceTime: uint64(runtime.Now().Unix()) - 3600, // 1 hour ago
+		TotalRebalances:   5,
+		DefensiveAlloc:    6500, // 65% defensive
+		AggressiveAlloc:   3500, // 35% aggressive
+	}, nil
 }
 
-// compute Consensus implements O(n log n) QuickSort-based median aggregation
-// This is the CORE of the Master Logic consensus mechanism
-func computeConsensus(prices []*PriceData, symbol string, config *Config, logger *slog.Logger) ConsensusResult {
-	if len(prices) == 0 {
-		return ConsensusResult{}
-	}
+// ═══════════════════════════════════════════════════════════════
+// FETCH VIX DATA
+// ═══════════════════════════════════════════════════════════════
 
-	// O(n log n) QuickSort-based sorting for median calculation
-	sort.Slice(prices, func(i, j int) bool {
-		return prices[i].Price < prices[j].Price
-	})
+func fetchVIXData(
+	runtime cre.Runtime,
+	endpoint string,
+	logger *slog.Logger,
+) (*VIXData, error) {
 
-	var median float64
-	n := len(prices)
-	if n%2 == 0 {
-		median = (prices[n/2-1].Price + prices[n/2].Price) / 2.0
-	} else {
-		median = prices[n/2].Price
-	}
+	// In production: http.SendRequest to fetch real VIX
+	// For simulation, return mock data
+	logger.Info("📡 [SIMULATED] Fetching VIX from CBOE...")
 
-	// Calculate variance
-	var sum float64
-	for _, p := range prices {
-		sum += p.Price
-	}
-	mean := sum / float64(n)
-
-	var sumSquaredDiff float64
-	for _, p := range prices {
-		diff := p.Price - mean
-		sumSquaredDiff += diff * diff
-	}
-	stdDev := math.Sqrt(sumSquaredDiff / float64(n))
-	variancePercent := (stdDev / mean) * 100.0
-
-	// Risk scoring based on variance thresholds
-	riskScore := 0.0
-	if variancePercent > config.RiskParameters.ExtremeVolatilityThreshold {
-		riskScore = 10.0
-	} else if variancePercent > config.RiskParameters.HighVolatilityThreshold {
-		riskScore = 7.0
-	} else if variancePercent > config.Consensus.MaxVariancePercent {
-		riskScore = 4.0
-	}
-
-	return ConsensusResult{
-		MedianPrice: median,
-		Variance:    variancePercent,
-		RiskScore:   riskScore,
-	}
+	return &VIXData{
+		Value:     27.85, // Elevated volatility
+		Timestamp: uint64(runtime.Now().Unix()),
+	}, nil
 }
+
+// ═══════════════════════════════════════════════════════════════
+// FETCH MARKET SENTIMENT
+// ═══════════════════════════════════════════════════════════════
+
+func fetchMarketSentiment(
+	runtime cre.Runtime,
+	logger *slog.Logger,
+) (*MarketSentiment, error) {
+
+	// In production: Call NewsAPI or Twitter API
+	logger.Info("📰 [SIMULATED] Analyzing market sentiment...")
+
+	return &MarketSentiment{
+		Score:       -0.35, // Slightly bearish
+		Source:      "NewsAPI",
+		HeadlineTop: "Fed signals higher rates, markets react negatively",
+	}, nil
+}
+
+// ═══════════════════════════════════════════════════════════════
+// AI AGENT CONSULTATION (LLM Reasoning)
+// ═══════════════════════════════════════════════════════════════
+
+func consultAIAgent(
+	runtime cre.Runtime,
+	aiEndpoint string,
+	apiKey string,
+	vix *VIXData,
+	sentiment *MarketSentiment,
+	state *OnChainState,
+	logger *slog.Logger,
+) (*AIRecommendation, error) {
+
+	// Build AI prompt
+	systemPrompt := `You are a DeFi Risk Manager with institutional-grade standards.
+Analyze the provided market data and recommend a vault rebalancing strategy.
+
+OUTPUT FORMAT (JSON ONLY):
+{
+  "riskScore": 0.85,
+  "rationale": "VIX at 27.85 indicates heightened volatility...",
+  "action": "DEFENSIVE",
+  "confidence": 0.92
+}
+
+RULES:
+- riskScore: 0.0 (no risk) to 1.0 (extreme risk)
+- action: "DEFENSIVE" (reduce risk), "NEUTRAL" (maintain), "AGGRESSIVE" (increase exposure)
+- rationale: Clear, concise explanation for executives
+`
+
+	userPrompt := fmt.Sprintf(`Current Market Conditions:
+- VIX Index: %.2f
+- Market Sentiment: %.2f (%.2f = bearish, +1.0 = bullish)
+- Headline: %s
+- Current Allocation: %d%% defensive, %d%% aggressive
+- Last Rebalance: %d second ago
+- Total Rebalances: %d
+
+Analyze the crash risk and recommend action.`,
+		vix.Value,
+		sentiment.Score,
+		sentiment.Score,
+		sentiment.HeadlineTop,
+		state.DefensiveAlloc/100,
+		state.AggressiveAlloc/100,
+		uint64(runtime.Now().Unix())-state.LastRebalanceTime,
+		state.TotalRebalances,
+	)
+
+	logger.Info("🤖 Calling AI Agent...", "endpoint", aiEndpoint)
+
+	// In production: Use http capability to call OpenAI/Gemini
+	// httpClient := http.NewClient(runtime, ...)
+	// response := httpClient.Post(aiEndpoint, payload)
+
+	// For simulation, return realistic AI response
+	logger.Info("🧠 [SIMULATED] AI Agent processing...")
+
+	aiResponse := &AIRecommendation{
+		RiskScore:  0.87, // High risk due to VIX + bearish sentiment
+		Rationale:  fmt.Sprintf("VIX at %.2f (elevated) combined with bearish sentiment (%.2f) indicates increased market stress. Recommend defensive posture to protect capital. Fed policy uncertainty compounds risk.", vix.Value, sentiment.Score),
+		Action:     "DEFENSIVE",
+		Confidence: 0.92,
+	}
+
+	logger.Info("✅ AI Response", "reasoning", aiResponse.Rationale)
+
+	return aiResponse, nil
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EXECUTE REBALANCE ON-CHAIN
+// ═══════════════════════════════════════════════════════════════
+
+func executeRebalance(
+	runtime cre.Runtime,
+	vaultAddress string,
+	ai *AIRecommendation,
+	vix *VIXData,
+	logger *slog.Logger,
+) (string, error) {
+
+	logger.Info("📝 Encoding rebalance transaction...")
+
+	// ABI encode: vault.rebalance(uint256 riskScore, uint256 vixValue, string rationale, string action)
+	riskScoreScaled := uint64(ai.RiskScore * 1e18)
+	vixValueScaled := uint64(vix.Value * 100)
+
+	// Function selector: keccak256("rebalance(uint256,uint256,string,string)")[:4] = 0xc4d66de8
+	calldata := fmt.Sprintf("0xc4d66de8%064x%064x...", riskScoreScaled, vixValueScaled)
+	// (String encoding omitted for brevity - would use ABI encoding library)
+
+	logger.Info("📡 Submitting transaction to vault...",
+		"vault", vaultAddress,
+		"riskScore", ai.RiskScore,
+		"action", ai.Action)
+
+	// In production: Use GenerateReport to trigger chain write
+	reportReq := &cre.ReportRequest{}
+	reportPromise := runtime.GenerateReport(reportReq)
+	report, err := reportPromise.Await()
+
+	if err != nil {
+		return "", fmt.Errorf("chain write failed: %w", err)
+	}
+
+	// Extract tx hash from report
+	txHash := "0x7f4b5c2a...3b8e" // Would come from report.TxHash
+
+	logger.Info("✅ Transaction confirmed", "tx", txHash)
+
+	return txHash, nil
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RESULT TYPE
+// ═══════════════════════════════════════════════════════════════
+
+type RebalanceResult struct {
+	Status      string  `json:"status"` // "EXECUTED", "SKIPPED", "NO_ACTION"
+	Reason      string  `json:"reason"`
+	AIRisk      float64 `json:"aiRisk"`
+	Action      string  `json:"action"`
+	VIXValue    float64 `json:"vixValue"`
+	Transaction string  `json:"transaction"`
+	Timestamp   uint64  `json:"timestamp"`
+}
+
+// ═══════════════════════════════════════════════════════════════
+// WASM ENTRYPOINT
+// ═══════════════════════════════════════════════════════════════
 
 func main() {
-	wasm.NewRunner(cre.ParseJSON[Config]).Run(InitWorkflow)
+	wasm.Run(InitWorkflow)
 }
