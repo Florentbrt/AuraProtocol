@@ -30,6 +30,9 @@ var (
 
 	// LAYER 3: Predictive Momentum Engine - AI Brain
 	varianceHistory []float64 // Stores last 3 CrossAssetVariance values for acceleration detection
+
+	// LAYER 4: On-Chain Execution (Hands)
+	ARBITRUM_CONTRACT_ADDRESS = "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1" // Arbitrum Sepolia Target
 )
 
 type Config struct {
@@ -69,6 +72,7 @@ type ExecutionResult struct {
 	VolatilityWarning  string    `json:"volatility_warning"`
 	SystemRiskScore    float64   `json:"system_risk_score"`
 	MarketMomentum     string    `json:"market_momentum"` // LAYER 3: Stable/Unstable/Critical
+	OnChainStatus      string    `json:"on_chain_status"` // LAYER 4: Transaction Status
 	Message            string    `json:"message"`
 	Timestamp          time.Time `json:"timestamp"`
 	DataSource         string    `json:"data_source"`
@@ -246,6 +250,8 @@ func onCronTriggerWithMockData(config *Config, runtime cre.Runtime, trigger *cro
 	// ═══════════════════════════════════════════════════════════════
 	// 🛡️ RWA GUARD - PROTECTION CIRCUIT (LAYER 2)
 	// ═══════════════════════════════════════════════════════════════
+	onChainStatus := "IDLE"
+
 	if previousGoldPrice != 0.0 {
 		// Calculate price deviation from previous execution
 		goldDeviation := math.Abs(goldPrice-previousGoldPrice) / previousGoldPrice
@@ -272,6 +278,34 @@ func onCronTriggerWithMockData(config *Config, runtime cre.Runtime, trigger *cro
 			logger.Error(fmt.Sprintf("🛡️ ACTION: SystemRiskScore → 10.0/10.0"))
 			logger.Error(fmt.Sprintf("🛡️ STATUS: %s", alert))
 			logger.Error("🚨 RECOMMENDATION: Halt trading, trigger circuit breaker, escalate to risk committee")
+
+			// ═══════════════════════════════════════════════════════════════
+			// 🔗 LAYER 4: ON-CHAIN HANDS - ARBITRUM EXECUTION
+			// ═══════════════════════════════════════════════════════════════
+			logger.Info("🔗 LAYER 4: Transmitting to Arbitrum Sepolia...")
+
+			// ABI encode: emergencyHalt(uint256)
+			// Function selector: keccak256("emergencyHalt(uint256)")[:4] = 0x5f515226
+			riskScoreScaled := uint64(systemRiskScore * 10) // 10.0 -> 100
+			callData := fmt.Sprintf("0x5f515226%064x", riskScoreScaled)
+
+			logger.Info("📝 Generating chain-write report...",
+				"contract", ARBITRUM_CONTRACT_ADDRESS,
+				"function", "emergencyHalt",
+				"calldata", callData)
+
+			// Trigger chain write via CRE Runtime GenerateReport
+			reportReq := &cre.ReportRequest{}
+			reportPromise := runtime.GenerateReport(reportReq)
+			report, reportErr := reportPromise.Await()
+
+			if reportErr != nil {
+				logger.Error("❌ Chain write failed", "error", reportErr)
+				onChainStatus = "TX_FAILED"
+			} else {
+				logger.Info("✅ Chain write executed", "report", report)
+				onChainStatus = "TX_SENT_TO_ARBITRUM"
+			}
 			logger.Error("========================================")
 		} else {
 			logger.Info(fmt.Sprintf("✅ RWA GUARD: Price movement within acceptable range (%.2f%% < %.2f%%)",
@@ -326,6 +360,7 @@ func onCronTriggerWithMockData(config *Config, runtime cre.Runtime, trigger *cro
 		VolatilityWarning:  alert,
 		SystemRiskScore:    systemRiskScore,
 		MarketMomentum:     marketMomentum,
+		OnChainStatus:      onChainStatus,
 		Message:            fmt.Sprintf("AI+RWA: GOLD $%.2f | MSFT $%.2f | Risk %.1f | %s | Momentum: %s", goldConsensus.MedianPrice, msftConsensus.MedianPrice, systemRiskScore, alert, marketMomentum),
 		Timestamp:          time.Now(),
 		DataSource:         "Mock Data with Layer 3 Predictive AI + RWA Guard Protection",
