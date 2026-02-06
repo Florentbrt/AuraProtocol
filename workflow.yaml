@@ -7,13 +7,16 @@ secrets:
     reference: ALPHA_VANTAGE_API_KEY
     required: true
 
-# HTTP Capability for external API calls
+# HTTP Capability for external API calls (2026 CRE SDK format)
 capabilities:
-  - id: http-actions@1.0.0-alpha
-    permissions:
-      - domain: www.alphavantage.co
-        methods: [GET]
-        paths: ["/query"]
+  - id: http@1.0.0
+    config:
+      allowed_hosts:
+        - www.alphavantage.co
+      allowed_methods:
+        - GET
+      max_response_size_bytes: 1048576  # 1MB
+      timeout_ms: 30000
 
 # Triggers
 triggers:

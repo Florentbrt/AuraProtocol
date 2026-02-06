@@ -1,0 +1,98 @@
+{"level":"debug","client":"GraphQL","time":"2026-02-06T11:30:16+01:00","message":">> variables: map[]"}
+{"level":"debug","client":"GraphQL","time":"2026-02-06T11:30:16+01:00","message":">> query: \nquery GetOrganizationDetails  {\n\tgetOrganization {\n\t\torganizationId\n\t}\n}"}
+{"level":"debug","client":"GraphQL","time":"2026-02-06T11:30:16+01:00","message":">> headers: map[Accept:[application/json; charset=utf-8] Authorization:[[REDACTED]] Content-Type:[application/json; charset=utf-8] User-Agent:[cre-cli]]"}
+{"level":"debug","client":"GraphQL","time":"2026-02-06T11:30:17+01:00","message":"<< {\"data\":{\"getOrganization\":{\"organizationId\":\"org_tSxKNXzJNNwBpmxm\"}}}"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"Target:  local"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"setting \"logging.seth-config-path\" not found in target \"local\""}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for ethereum-mainnet; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for ethereum-testnet-sepolia-base-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for ethereum-mainnet-base-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for avalanche-testnet-fuji; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for avalanche-mainnet; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for polygon-testnet-amoy; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for polygon-mainnet; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for binance_smart_chain-testnet; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for binance_smart_chain-mainnet; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for ethereum-testnet-sepolia-arbitrum-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for ethereum-mainnet-arbitrum-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for ethereum-testnet-sepolia-optimism-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for ethereum-mainnet-optimism-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for private-testnet-andesite; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for ethereum-mainnet-zksync-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for ethereum-testnet-sepolia-zksync-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for jovay-testnet; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for ethereum-testnet-sepolia-worldchain-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for plasma-testnet; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for ethereum-testnet-sepolia-linea-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for ink-testnet-sepolia; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for hyperliquid-testnet; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for apechain-testnet-curtis; skipping"}
+{"level":"debug","time":"2026-02-06T11:30:17+01:00","message":"RPC not provided for arc-testnet; skipping"}
+Warning: using default private key for chain write simulation. To use your own key, set CRE_ETH_PRIVATE_KEY in your .env file or system environment.
+{"level":"debug","Workflow directory":".","Command":"/usr/bin/go build -o tmp.wasm -trimpath -ldflags=-buildid= -w -s .","time":"2026-02-06T11:30:17+01:00","message":"Executing go build command"}
+{"level":"debug","time":"2026-02-06T11:30:19+01:00","message":"Build output: "}
+Workflow compiled
+[34m2026-02-06T11:30:28Z [0m[36;1m[USER LOG][0m msg="Using fallback API key"
+[34m2026-02-06T11:30:28Z [0m[36;1m[SIMULATION][0m Simulator Initialized
+
+[34m2026-02-06T11:30:28Z [0m[36;1m[SIMULATION][0m Running trigger trigger=cron-trigger@1.0.0
+[34m2026-02-06T11:30:28Z [0m[35m[WORKFLOW][0m WorkflowExecutionStarted
+  TriggerID: 2026-02-06T10:30:28Z
+  WorkflowOwner: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  WorkflowName: aura-protocol-rwa-ingestion
+  Version: 2.0.0
+  WorkflowID: 1111111111111111111111111111111111111111111111111111111111111111
+  WorkflowExecutionID: 9bae25913c5048f17ea41bd14a5d90a38cbebc1e89dbb1e69a70e32a6a677794
+  DonID: 1
+  DonF: 0
+  DonN: 1
+  P2PID: 12D3KooW9pNAk8aiBuGVQtWRdbkLmo5qVL3e2h5UxbN2Nz9ttwiw
+  Trigger: <nil>
+[34m2026-02-06T11:30:28Z [0m[36;1m[USER LOG][0m msg="Using fallback API key"
+[34m2026-02-06T11:30:28Z [0m[36;1m[USER LOG][0m msg="========================================"
+[34m2026-02-06T11:30:28Z [0m[36;1m[USER LOG][0m msg="🚀 AuraProtocol - RWA Data Ingestion (SIMULATION MODE)"
+[34m2026-02-06T11:30:28Z [0m[36;1m[USER LOG][0m msg="========================================"
+[34m2026-02-06T11:30:28Z [0m[36;1m[USER LOG][0m msg="⚠️  HTTP capabilities not available in local simulation"
+[34m2026-02-06T11:30:28Z [0m[36;1m[USER LOG][0m msg="📊 Using REALISTIC MOCK DATA for demonstration"
+[34m2026-02-06T11:30:28Z [0m[36;1m[USER LOG][0m msg="✅ GOLD Price (Mock): $243.75"
+[34m2026-02-06T11:30:28Z [0m[36;1m[USER LOG][0m msg="✅ MSFT Price (Mock): $438.20"
+[34m2026-02-06T11:30:28Z [0m[36;1m[USER LOG][0m msg="========================================"
+[34m2026-02-06T11:30:28Z [0m[36;1m[USER LOG][0m msg="✅ SIMULATION DATA PROCESSED"
+[34m2026-02-06T11:30:28Z [0m[36;1m[USER LOG][0m msg="========================================"
+[34m2026-02-06T11:30:28Z [0m[36;1m[USER LOG][0m msg="GOLD: $243.75 | MSFT: $438.20"
+[34m2026-02-06T11:30:28Z [0m[36;1m[USER LOG][0m msg="Risk Score: 0.0/10.0"
+[34m2026-02-06T11:30:28Z [0m[36;1m[USER LOG][0m msg="========================================"
+[34m2026-02-06T11:30:28Z [0m[36;1m[USER LOG][0m msg="ℹ️  To use LIVE data, deploy to a DON environment with HTTP capabilities"
+[34m2026-02-06T11:30:28Z [0m[35m[WORKFLOW][0m WorkflowExecutionFinished - Status: [32mSUCCESS
+[0m  WorkflowOwner: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  WorkflowName: aura-protocol-rwa-ingestion
+  Version: 2.0.0
+  WorkflowID: 1111111111111111111111111111111111111111111111111111111111111111
+  WorkflowExecutionID: 9bae25913c5048f17ea41bd14a5d90a38cbebc1e89dbb1e69a70e32a6a677794
+  DonID: 1
+  DonF: 0
+  DonN: 1
+  P2PID: 12D3KooW9pNAk8aiBuGVQtWRdbkLmo5qVL3e2h5UxbN2Nz9ttwiw
+  Trigger: <nil>
+
+Workflow Simulation Result:
+ {
+  "CrossAssetVariance": 0,
+  "DataSource": "Mock Data (Local Simulation - HTTP not available in WASM simulation)",
+  "GoldPrice": 243.75,
+  "GoldVariance": 0,
+  "Message": "SIMULATION: GOLD $243.75 | MSFT $438.20 | Risk 0.0",
+  "MsftPrice": 438.2,
+  "MsftVariance": 0,
+  "SystemRiskScore": 0,
+  "Timestamp": "2026-02-06T10:30:28.326068454Z",
+  "VolatilityWarning": "Normal"
+}
+
+[34m2026-02-06T11:30:28Z [0m[36;1m[SIMULATION][0m Execution finished signal received
+[34m2026-02-06T11:30:28Z [0m[36;1m[SIMULATION][0m Skipping WorkflowEngineV2
+{"level":"debug","time":"2026-02-06T11:30:28+01:00","message":"Current version parsed as: 1.0.7"}
+{"level":"debug","time":"2026-02-06T11:30:28+01:00","message":"Loading cache from /home/salkfloren/.cre/update.json"}
+{"level":"debug","time":"2026-02-06T11:30:28+01:00","message":"Cache loaded. Last check: 2026-02-06 10:36:31.96236468 +0100 CET, Latest version: v1.0.7"}
+{"level":"debug","time":"2026-02-06T11:30:28+01:00","message":"Using cached latest version: v1.0.7"}
+{"level":"debug","time":"2026-02-06T11:30:28+01:00","message":"Current version 1.0.7 is up-to-date."}

@@ -1,0 +1,76 @@
+{"level":"debug","time":"2026-02-06T11:27:51+01:00","message":"token expired or approaching expiration, refreshing"}
+{"level":"debug","time":"2026-02-06T11:27:51+01:00","message":"refreshing tokens"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"token refreshed"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"refreshed tokens saved to disk"}
+{"level":"debug","client":"GraphQL","time":"2026-02-06T11:27:52+01:00","message":">> variables: map[]"}
+{"level":"debug","client":"GraphQL","time":"2026-02-06T11:27:52+01:00","message":">> query: \nquery GetOrganizationDetails  {\n\tgetOrganization {\n\t\torganizationId\n\t}\n}"}
+{"level":"debug","client":"GraphQL","time":"2026-02-06T11:27:52+01:00","message":">> headers: map[Accept:[application/json; charset=utf-8] Authorization:[[REDACTED]] Content-Type:[application/json; charset=utf-8] User-Agent:[cre-cli]]"}
+{"level":"debug","client":"GraphQL","time":"2026-02-06T11:27:52+01:00","message":"<< {\"data\":{\"getOrganization\":{\"organizationId\":\"org_tSxKNXzJNNwBpmxm\"}}}"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"Target:  local"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"setting \"logging.seth-config-path\" not found in target \"local\""}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for ethereum-mainnet; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for ethereum-testnet-sepolia-base-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for ethereum-mainnet-base-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for avalanche-testnet-fuji; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for avalanche-mainnet; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for polygon-testnet-amoy; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for polygon-mainnet; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for binance_smart_chain-testnet; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for binance_smart_chain-mainnet; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for ethereum-testnet-sepolia-arbitrum-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for ethereum-mainnet-arbitrum-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for ethereum-testnet-sepolia-optimism-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for ethereum-mainnet-optimism-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for private-testnet-andesite; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for ethereum-mainnet-zksync-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for ethereum-testnet-sepolia-zksync-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for jovay-testnet; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for ethereum-testnet-sepolia-worldchain-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for plasma-testnet; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for ethereum-testnet-sepolia-linea-1; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for ink-testnet-sepolia; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for hyperliquid-testnet; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for apechain-testnet-curtis; skipping"}
+{"level":"debug","time":"2026-02-06T11:27:52+01:00","message":"RPC not provided for arc-testnet; skipping"}
+Warning: using default private key for chain write simulation. To use your own key, set CRE_ETH_PRIVATE_KEY in your .env file or system environment.
+{"level":"debug","Workflow directory":".","Command":"/usr/bin/go build -o tmp.wasm -trimpath -ldflags=-buildid= -w -s .","time":"2026-02-06T11:27:53+01:00","message":"Executing go build command"}
+{"level":"debug","time":"2026-02-06T11:27:55+01:00","message":"Build output: "}
+Workflow compiled
+[34m2026-02-06T11:28:03Z [0m[36;1m[USER LOG][0m msg="Using fallback API key"
+[34m2026-02-06T11:28:03Z [0m[36;1m[SIMULATION][0m Simulator Initialized
+
+[34m2026-02-06T11:28:03Z [0m[36;1m[SIMULATION][0m Running trigger trigger=cron-trigger@1.0.0
+[34m2026-02-06T11:28:03Z [0m[35m[WORKFLOW][0m WorkflowExecutionStarted
+  TriggerID: 2026-02-06T10:28:03Z
+  WorkflowOwner: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  WorkflowName: aura-protocol-rwa-ingestion
+  Version: 2.0.0
+  WorkflowID: 1111111111111111111111111111111111111111111111111111111111111111
+  WorkflowExecutionID: cc6ae6842ee64522c8dc5559107be9d9c9e27fe54c03118e8bbfe8b939b95073
+  DonID: 1
+  DonF: 0
+  DonN: 1
+  P2PID: 12D3KooW9pNAk8aiBuGVQtWRdbkLmo5qVL3e2h5UxbN2Nz9ttwiw
+  Trigger: <nil>
+[34m2026-02-06T11:28:03Z [0m[36;1m[USER LOG][0m msg="Using fallback API key"
+[34m2026-02-06T11:28:03Z [0m[36;1m[USER LOG][0m msg="========================================"
+[34m2026-02-06T11:28:03Z [0m[36;1m[USER LOG][0m msg="🚀 AuraProtocol - LIVE RWA Data Ingestion Via CRE HTTP Capability"
+[34m2026-02-06T11:28:03Z [0m[36;1m[USER LOG][0m msg="========================================"
+[34m2026-02-06T11:28:03Z [0m[36;1m[USER LOG][0m msg="🔑 Using Alpha Vantage API"
+[34m2026-02-06T11:28:03Z [0m[36;1m[USER LOG][0m msg="📊 Fetching LIVE GOLD price via CRE HTTP Capability..."
+[34m2026-02-06T11:28:03Z [0m[36;1m[USER LOG][0m msg="Sending HTTP request via capability..." url="https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=GLD&apikey=R4ZVPT8S0290SQP1"
+[34m2026-02-06T11:28:03Z [0m[36;1m[USER LOG][0m msg="Runtime is not a NodeRuntime"
+[34m2026-02-06T11:28:03Z [0m[36;1m[USER LOG][0m msg="Failed to fetch GOLD price" error="runtime type mismatch: expected NodeRuntime"
+[34m2026-02-06T11:28:03Z [0m[35m[WORKFLOW][0m WorkflowExecutionFinished - Status: [31mERRORED
+[0m  WorkflowOwner: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  WorkflowName: aura-protocol-rwa-ingestion
+  Version: 2.0.0
+  WorkflowID: 1111111111111111111111111111111111111111111111111111111111111111
+  WorkflowExecutionID: cc6ae6842ee64522c8dc5559107be9d9c9e27fe54c03118e8bbfe8b939b95073
+  DonID: 1
+  DonF: 0
+  DonN: 1
+  P2PID: 12D3KooW9pNAk8aiBuGVQtWRdbkLmo5qVL3e2h5UxbN2Nz9ttwiw
+  Trigger: <nil>
+Workflow execution failed:
+ runtime type mismatch: expected NodeRuntime
